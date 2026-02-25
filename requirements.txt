@@ -1,0 +1,47 @@
+# ----------------------------
+# Core
+# ----------------------------
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+
+# ----------------------------
+# Computer Vision + camera IO
+# ----------------------------
+opencv-python>=4.9.0
+Pillow>=10.0.0
+tqdm>=4.66
+
+# ----------------------------
+# QR / Barcodes
+# ----------------------------
+pyzbar>=0.1.9
+
+# ----------------------------
+# OCR (elige 1; ambos útiles en PoC)
+# Los instalamos por separado por dependencias de PyTorch pesado y conflictivo
+# ----------------------------
+pytesseract>=0.3.10
+easyocr>=1.7.1
+
+# ----------------------------
+# Detection / Segmentation (PoC rápido)
+# ----------------------------
+ultralytics>=8.2.0
+
+# ----------------------------
+# Utils
+# ----------------------------
+python-dotenv>=1.0
+pydantic>=2.6
+
+# ----------------------------
+# Viz / reporting
+# ----------------------------
+matplotlib>=3.8
+
+# ----------------------------
+# API (si expones resultados / healthcheck)
+# ----------------------------
+fastapi>=0.110
+uvicorn[standard]>=0.27

@@ -1,4 +1,6 @@
+# ----------------------------
 # Python
+# ----------------------------
 __pycache__/
 *.py[cod]
 *.pyo
@@ -8,26 +10,71 @@ __pycache__/
 dist/
 build/
 
-# Virtual env
+# ----------------------------
+# Virtual environments
+# ----------------------------
 .venv/
 venv/
 ENV/
 env/
 
-# dotenv
+# ----------------------------
+# Environment variables
+# ----------------------------
 .env
 .env.*
 
+# ----------------------------
 # Tests / coverage
+# ----------------------------
 .pytest_cache/
 .coverage
 htmlcov/
 
+# ----------------------------
 # Logs
+# ----------------------------
 *.log
 
+# ----------------------------
 # macOS
+# ----------------------------
 .DS_Store
 
+# ----------------------------
 # VS Code
+# ----------------------------
 .vscode/
+
+# ----------------------------
+# Data (CRÍTICO en visión industrial)
+# ----------------------------
+data/
+datasets/
+captures/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.tiff
+*.bmp
+
+# ----------------------------
+# Model weights / checkpoints
+# ----------------------------
+models/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.ckpt
+
+# ----------------------------
+# Temporary outputs
+# ----------------------------
+outputs/
+results/
+runs/
