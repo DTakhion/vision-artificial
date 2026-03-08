@@ -16,6 +16,7 @@ tqdm>=4.66
 # QR / Barcodes
 # ----------------------------
 pyzbar>=0.1.9
+zxing-cpp
 
 # ----------------------------
 # OCR (elige 1; ambos útiles en PoC)
@@ -23,6 +24,7 @@ pyzbar>=0.1.9
 # ----------------------------
 pytesseract>=0.3.10
 easyocr>=1.7.1
+tesseract 
 
 # ----------------------------
 # Detection / Segmentation (PoC rápido)

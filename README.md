@@ -228,8 +228,75 @@ python scripts/capture_realsense.py --save_video --save_depth
 ``` bash
 python -m utils.vision_qr data/tests_qr/527ca803-4e3c-4547-8cf5-00cb5f406bf7.JPG --variants all --budget 650
 python utils/vision_barcode.py data/tests_qr/barcode_ok.jpg
+
+python -m utils.vision_barcode data/tests_barcode/527ca803-4e3c-4547-8cf5-00cb5f406bf7.JPG --variants all --budget 650
+
+# Preferir zxingcpp (recomendado si lo tienes instalado)
+python -m utils.vision_barcode data/tests_barcode/527ca803-4e3c-4547-8cf5-00cb5f406bf7.JPG --variants all --budget 650 --prefer zxingcpp
+
+# Preferir pyzbar
+python -m utils.vision_barcode data/tests_barcode/527ca803-4e3c-4547-8cf5-00cb5f406bf7.JPG --variants all --budget 650 --prefer pyzbar
+
+# Preferir OpenCV barcode (si tu build lo soporta)
+python -m utils.vision_barcode data/tests_barcode/527ca803-4e3c-4547-8cf5-00cb5f406bf7.JPG --variants all --budget 650 --prefer opencv_barcode
+
 python utils/vision_ocr.py data/tests_qr/serial_ok.jpg
+python -m utils.vision_ocr data/tests_barcode/ALGUNA_IMAGEN.JPG --variants all --budget 650 --aggressive
+python -m utils.vision_ocr data/tests_barcode/ALGUNA_IMAGEN.JPG --variants all --budget 650 --prefer tesseract --no_fallback --aggressive
+python -m utils.vision_ocr data/tests_barcode/ALGUNA_IMAGEN.JPG --variants all --budget 650 --prefer easyocr --no_fallback --aggressive
+
+python -m utils.vision_ocr data/tests_barcode/2b80dbe7-8ac4-423e-82b5-0289f6ed1684.JPG \
+  --variants all --no_budget --max_tries 120 --aggressive --roi all
+
+python -m utils.vision_ocr data/tests_barcode/2b80dbe7-8ac4-423e-82b5-0289f6ed1684.JPG \
+  --variants all --no_budget --max_tries 40 --aggressive --roi all --save_debug_rois data/_debug_rois --debug
+
 python utils/vision_readout.py data/tests_qr/qr_ok.jpg
+# QR+BarCode
+python -m utils.vision_readout data/tests_barcode/2b80dbe7-8ac4-423e-82b5-0289f6ed1684.JPG
+# QR+BarCode+OCR
+python -m utils.vision_readout data/tests_barcode/2b80dbe7-8ac4-423e-82b5-0289f6ed1684.JPG --mode retry --ocr
+
+# BarCode
+## collect mode
+python -m utils.vision_barcode data/tests_multibarcode/1f2a0f03-f73c-4da7-a943-a54088c2c799.JPG --mode collect --budget 1800 --variants all --roi_upscale 4.0
+
+## collect mode agresive y recue
+python -m utils.vision_barcode data/tests_multibarcode/29788e64-ad4a-4d62-849c-5b22f1cb2e83.JPG --mode collect --budget 1800 --variants all --roi_upscale 4.0 --roi_stage_ratio 0.55 --max_tiles 5
+
+## CodeBar mas presupuesto y todas las variables (indicado)
+python -m utils.vision_barcode /ruta/a/imagen.jpg --mode collect --budget 700 --variants all
+
+# sin ROI
+python -m utils.vision_barcode /ruta/a/imagen.jpg --mode collect --no_roi
+
+# con ROI pero sin barrido full imagen
+python -m utils.vision_barcode /ruta/a/imagen.jpg --mode collect --no_full_image
+
+# utils/vision_barcode_plus.py 
+python -m utils.vision_barcode_plus data/tests_multibarcode/29788e64-ad4a-4d62-849c-5b22f1cb2e83.JPG --budget 6500 --variants all --roi_upscale 4.0
+
+# ReadOut
+
+# BarCode
+python -m utils.vision_readout /ruta/a/imagen.jpg --mode immediate --barcode --no-ocr --no-qr
+
+# barCode + OCR
+python -m utils.vision_readout /ruta/a/imagen.jpg --mode immediate --barcode --ocr --no-qr
+
+# Retry con BarCode Collect
+python -m utils.vision_readout data/tests_multibarcode/29788e64-ad4a-4d62-849c-5b22f1cb2e83.JPG --mode retry --budget 6500 --barcode_mode collect_plus --barcode_budget 6000 --no-ocr --no-qr
+
+# especifico Schneider
+python -m utils.vision_readout /ruta/a/imagen.jpg --mode retry --barcode --ocr --no-qr --barcode_mode collect
+
+## OCR
+# agresivo, modo collect
+python -m utils.vision_ocr /ruta/a/imagen.jpg --aggressive --mode collect
+
+# OCR+BarCode like
+python -m utils.vision_ocr /ruta/a/imagen.jpg --roi barcode_like --aggressive --mode collect
+
 ```
 ## Preprocesamiento – Herramientas y parámetros (`utils/vision_preprocess.py`)
 
