@@ -313,3 +313,54 @@ python -m utils.vision_ocr /ruta/a/imagen.jpg --roi barcode_like --aggressive --
 | Binarización adaptativa (Gauss) | `binarize=False` | `blockSize=31`, `C=2` | `cv2.adaptiveThreshold(sharp,255,GAUSSIAN_C,THRESH_BINARY,31,2)` | `bw` (si se activa) |
 | Upscale (INTER_CUBIC) | `upscale=True` | `upscale_factors=(2.0,)` | `cv2.resize(..., fx=2.0, fy=2.0, INTER_CUBIC)` | `sharp_x2`, `bilateral_x2`, `morph_close_x2`, `bw_x2` *(según existan)* |
 | Métrica de nitidez (Laplacian var) | (función aparte) | — | `cv2.Laplacian(gray, CV_64F).var()` | No crea variante; devuelve score |
+
+## scripts/capture_opencv.py
+
+``` bash
+python scripts/capture_opencv.py \
+--device 0 \
+--width 1280 \
+--height 720 \
+--fps 30 \
+--events \
+--manual_burst 3 \
+--manual_buffer 5 \
+--every 0
+```
+e: guarda un evento manual
+q: cierra la captura de forma normal
+Ctrl + C: también corta y cierra
+
+## app/main.py
+
+# terminal 1
+python app/main.py
+
+# terminal 2
+capture_opencv.py
+
+# inmediato 
+python app/main.py --once
+python app/main.py --once --overwrite
+
+# scripts/capture_opencv.py
+``` bash
+python scripts/capture_opencv.py \
+  --device 0 \
+  --width 1280 \
+  --height 720 \
+  --fps 30 \
+  --out_dir data/captures/opencv \
+  --events \
+  --auto_events \
+  --auto_method bg \
+  --auto_use_window_capture \
+  --auto_window_s 20 \
+  --auto_interval_s 1.0 \
+  --roi 180 120 950 500 \
+  --every 0 \
+  --present_frames 8 \
+  --min_fg_ratio 0.03 \
+  --min_contour_area 4000 \
+  --cooldown_s 20
+```
