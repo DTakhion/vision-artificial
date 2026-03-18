@@ -364,3 +364,47 @@ python scripts/capture_opencv.py \
   --min_contour_area 4000 \
   --cooldown_s 20
 ```
+
+# scripts/capture_realsense.py
+python scripts/capture_opencv.py \
+  --device 0 \
+  --width 1280 \
+  --height 720 \
+  --fps 30 \
+  --out_dir data/captures/opencv \
+  --events \
+  --auto_events \
+  --auto_method bg \
+  --auto_use_window_capture \
+  --auto_window_s 7 \
+  --auto_interval_s 1.0 \
+  --roi 180 120 950 500 \
+  --every 0 \
+  --present_frames 8 \
+  --min_fg_ratio 0.03 \
+  --min_contour_area 4000 \
+  --cooldown_s 20
+
+# utils/vision_picking.py
+``` bash
+# Total
+python -m utils.vision_picking data/tests_picking/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2.png
+
+# Sin guardar
+python -m utils.vision_picking <ruta_imagen> --no_save_summary
+
+# Cambiar carpeta
+python -m utils.vision_picking <ruta_imagen> --summary_output_dir data/picking/summary_results
+```
+
+# intel realSense D455
+sudo /opt/homebrew/bin/rs-enumerate-devices
+sudo "$(pwd)/.venv/bin/python" scripts/test_realsense.py
+
+# main.py
+python -m app.main \
+  --mode_app picking_match \
+  --picking_image data/tests_picking/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2.png \
+  --picking_excel data/tests_excel_picking/SCHNSCL01_Informe_de_Fill_Rate_OUTBOUND_v2.xlsx \
+  --packstructure_excel data/tests_packstructure/PackStructure.xlsx
+
