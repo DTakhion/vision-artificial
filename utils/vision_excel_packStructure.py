@@ -35,6 +35,7 @@ def _norm_key(txt: Any) -> str:
         .replace("í", "i")
         .replace("ó", "o")
         .replace("ú", "u")
+        .replace("ñ", "n")
     )
     s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
     return s
@@ -50,7 +51,7 @@ def _to_int(val: Any) -> Optional[int]:
     if val is None or val == "":
         return None
     try:
-        return int(round(float(val)))
+        return int(round(float(str(val).replace(",", "."))))
     except Exception:
         return None
 
@@ -62,6 +63,39 @@ def _to_float(val: Any) -> Optional[float]:
         return float(str(val).replace(",", "."))
     except Exception:
         return None
+
+
+def _normalize_excel_value(val: Any) -> Any:
+    """
+    Normaliza valores del Excel sin perder trazabilidad:
+    - None -> ""
+    - enteros -> int
+    - decimales -> float
+    - texto -> string limpio
+    """
+    if val is None:
+        return ""
+
+    if isinstance(val, (int, float)):
+        if isinstance(val, float) and val.is_integer():
+            return int(val)
+        return val
+
+    s = _clean_text(val)
+    if s == "":
+        return ""
+
+    try:
+        f = float(s.replace(",", "."))
+        if f.is_integer():
+            return int(f)
+        return f
+    except Exception:
+        return s
+
+
+def _clean_record(rec: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: _normalize_excel_value(v) for k, v in rec.items()}
 
 
 def _col_to_index(col_letters: str) -> int:
@@ -265,15 +299,52 @@ def filter_packstructure_by_skus(
     return out
 
 
-def build_packstructure_index(records: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    idx: Dict[str, Dict[str, Any]] = {}
+def _resolve_peso_pal(rec: Dict[str, Any]) -> Optional[float]:
+    """
+    Intenta rescatar peso_pal incluso si el encabezado del Excel viene raro,
+    duplicado o con una variante inesperada.
+    """
+    candidate_keys = [
+        "peso_pal",
+        "peso_pallet",
+        "peso_pl",
+        "peso_palet",
+    ]
+
+    for key in candidate_keys:
+        if key in rec and rec.get(key) not in ("", None):
+            val = _to_float(rec.get(key))
+            if val is not None:
+                return val
+
+    # fallback: si por algún motivo el último encabezado quedó duplicado/mal nombrado
+    # buscamos una clave relacionada a "peso" + "pal"
+    for key, value in rec.items():
+        nk = _norm_key(key)
+        if "peso" in nk and "pal" in nk and value not in ("", None):
+            val = _to_float(value)
+            if val is not None:
+                return val
+
+    return None
+
+
+def build_packstructure_index(records: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Indexa por SKU y conserva TODAS las filas para ese SKU.
+    Así evitamos sobrescribir si el mismo código aparece repetido.
+    """
+    idx: Dict[str, List[Dict[str, Any]]] = {}
 
     for rec in records:
         sku = _norm_code(rec.get("sku"))
         if not sku:
             continue
 
-        idx[sku] = {
+        rec_clean = _clean_record(rec)
+
+        pack_item = {
+            # Campos alias / convenientes
             "row": rec.get("_row"),
             "sku": _clean_text(rec.get("sku")),
             "descripcion": _clean_text(rec.get("descripcion")),
@@ -304,10 +375,13 @@ def build_packstructure_index(records: List[Dict[str, Any]]) -> Dict[str, Dict[s
             "largo_pal": _to_float(rec.get("largo_pal")),
             "ancho_pal": _to_float(rec.get("ancho_pal")),
             "alto_pal": _to_float(rec.get("alto_pal")),
-            "peso_pal": _to_float(rec.get("peso_pal")),
+            "peso_pal": _resolve_peso_pal(rec),
 
-            "raw": rec,
+            # Trazabilidad total
+            "packstructure_full": rec_clean,
         }
+
+        idx.setdefault(sku, []).append(pack_item)
 
     return idx
 
@@ -319,59 +393,72 @@ def match_picking_with_packstructure(
     products = picking_result.get("products", []) or []
     pack_records = packstructure_result.get("records", []) or []
 
-    idx = build_packstructure_index(pack_records)
+    # filtramos opcionalmente por los SKUs que efectivamente vienen desde OCR
+    picking_skus = [p.get("codigo_item") for p in products if p.get("codigo_item")]
+    filtered_pack_records = filter_packstructure_by_skus(pack_records, skus=picking_skus)
+
+    idx = build_packstructure_index(filtered_pack_records)
 
     matched_products = []
     for prod in products:
         codigo = _norm_code(prod.get("codigo_item"))
-        pack_prod = idx.get(codigo)
+        pack_matches = idx.get(codigo, [])
 
-        if pack_prod is None:
+        if not pack_matches:
             matched_products.append({
                 "codigo_item_ocr": prod.get("codigo_item"),
                 "descripcion_ocr": prod.get("descripcion"),
                 "unidades_ocr": prod.get("unidades"),
                 "match_status": "not_found_in_packstructure",
+                "packstructure_match_count": 0,
                 "packstructure": None,
+                "packstructure_matches": [],
             })
             continue
 
+        first_match = pack_matches[0]
+
         matched_products.append({
             "codigo_item_ocr": prod.get("codigo_item"),
-            "codigo_item_pack": pack_prod.get("sku"),
+            "codigo_item_pack": first_match.get("sku"),
             "descripcion_ocr": prod.get("descripcion"),
-            "descripcion_pack": pack_prod.get("descripcion"),
+            "descripcion_pack": first_match.get("descripcion"),
             "unidades_ocr": prod.get("unidades"),
-            "item_type_pack": pack_prod.get("item_type"),
+            "item_type_pack": first_match.get("item_type"),
 
-            "qty_ea_pack": pack_prod.get("qty_ea"),
-            "largo_ea_pack": pack_prod.get("largo_ea"),
-            "ancho_ea_pack": pack_prod.get("ancho_ea"),
-            "alto_ea_pack": pack_prod.get("alto_ea"),
-            "peso_ea_pack": pack_prod.get("peso_ea"),
-            "ean_pack": pack_prod.get("ean"),
+            "qty_ea_pack": first_match.get("qty_ea"),
+            "largo_ea_pack": first_match.get("largo_ea"),
+            "ancho_ea_pack": first_match.get("ancho_ea"),
+            "alto_ea_pack": first_match.get("alto_ea"),
+            "peso_ea_pack": first_match.get("peso_ea"),
+            "ean_pack": first_match.get("ean"),
 
-            "qty_inn_pack": pack_prod.get("qty_inn"),
-            "largo_inn_pack": pack_prod.get("largo_inn"),
-            "ancho_inn_pack": pack_prod.get("ancho_inn"),
-            "alto_inn_pack": pack_prod.get("alto_inn"),
-            "peso_inn_pack": pack_prod.get("peso_inn"),
-            "ean_in_pack": pack_prod.get("ean_in"),
+            "qty_inn_pack": first_match.get("qty_inn"),
+            "largo_inn_pack": first_match.get("largo_inn"),
+            "ancho_inn_pack": first_match.get("ancho_inn"),
+            "alto_inn_pack": first_match.get("alto_inn"),
+            "peso_inn_pack": first_match.get("peso_inn"),
+            "ean_in_pack": first_match.get("ean_in"),
 
-            "qty_cs_pack": pack_prod.get("qty_cs"),
-            "largo_cs_pack": pack_prod.get("largo_cs"),
-            "ancho_cs_pack": pack_prod.get("ancho_cs"),
-            "alto_cs_pack": pack_prod.get("alto_cs"),
-            "peso_cs_pack": pack_prod.get("peso_cs"),
-            "ean_cs_pack": pack_prod.get("ean_cs"),
+            "qty_cs_pack": first_match.get("qty_cs"),
+            "largo_cs_pack": first_match.get("largo_cs"),
+            "ancho_cs_pack": first_match.get("ancho_cs"),
+            "alto_cs_pack": first_match.get("alto_cs"),
+            "peso_cs_pack": first_match.get("peso_cs"),
+            "ean_cs_pack": first_match.get("ean_cs"),
 
-            "qty_pal_pack": pack_prod.get("qty_pal"),
-            "largo_pal_pack": pack_prod.get("largo_pal"),
-            "ancho_pal_pack": pack_prod.get("ancho_pal"),
-            "alto_pal_pack": pack_prod.get("alto_pal"),
-            "peso_pal_pack": pack_prod.get("peso_pal"),
+            "qty_pal_pack": first_match.get("qty_pal"),
+            "largo_pal_pack": first_match.get("largo_pal"),
+            "ancho_pal_pack": first_match.get("ancho_pal"),
+            "alto_pal_pack": first_match.get("alto_pal"),
+            "peso_pal_pack": first_match.get("peso_pal"),
 
             "match_status": "matched",
+            "packstructure_match_count": len(pack_matches),
+            # compatibilidad simple: primer match
+            "packstructure": first_match,
+            # trazabilidad completa: todas las coincidencias
+            "packstructure_matches": pack_matches,
         })
 
     return {
@@ -380,7 +467,9 @@ def match_picking_with_packstructure(
         "counts": {
             "picking_products": len(products),
             "packstructure_rows": len(pack_records),
+            "packstructure_filtered_rows": len(filtered_pack_records),
             "matched_products": sum(1 for p in matched_products if p["match_status"] == "matched"),
+            "not_found_products": sum(1 for p in matched_products if p["match_status"] == "not_found_in_packstructure"),
         },
     }
 

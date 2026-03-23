@@ -405,6 +405,27 @@ sudo "$(pwd)/.venv/bin/python" scripts/test_realsense.py
 python -m app.main \
   --mode_app picking_match \
   --picking_image data/tests_picking/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2.png \
-  --picking_excel data/tests_excel_picking/SCHNSCL01_Informe_de_Fill_Rate_OUTBOUND_v2.xlsx \
-  --packstructure_excel data/tests_packstructure/PackStructure.xlsx
+  --picking_excel data/tests_excel_picking/SCHNSCL01_Informe_de_Fill_Rate_OUTBOUND_v2.xlsx \                                                 
+  --packstructure_excel data/tests_picking/PackStructure.xlsx
 
+# Cierre (desde el orquestador app/main.py)
+## etapa 1; Primero generamos el consolidado:
+python -m app.main \
+  --mode_app picking_match \
+  --picking_image data/tests_picking/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2.png \
+  --picking_excel data/tests_excel_picking/SCHNSCL01_Informe_de_Fill_Rate_OUTBOUND_v2.xlsx \
+  --packstructure_excel data/tests_picking/PackStructure.xlsx
+
+## etapa 2; ejecutamos el cierre con el readout_result.json
+python -m app.main \
+  --mode_app closure_match \
+  --summary_json data/picking/summary_pickingVision_fillRate_packStructure/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2_summary_pickingVision_fillRate_packStructure.json \
+  --readout_json data/captures/opencv/frames_xxx/events/event_xxx/readout_result.json
+
+  ## etapa 3; final, cierre
+  python -m app.main \
+  --mode_app closure_match \
+  --summary_json data/picking/summary_pickingVision_fillRate_packStructure/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2_summary_pickingVision_fillRate_packStructure.json \
+  --detected_barcodes_json data/tests/manual_barcodes.json
+
+  # scripts/capture_realsense_depth.py
