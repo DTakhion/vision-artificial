@@ -24,6 +24,36 @@ DEFAULT_VARIANTS_BARCODE: List[str] = [
     "bw_x2",
 ]
 
+ALLOWED_1D_FORMATS: Set[str] = {
+    "EAN-13",
+    "EAN13",
+    "EAN-8",
+    "EAN8",
+    "UPC-A",
+    "UPCA",
+    "UPC-E",
+    "UPCE",
+    "CODE-128",
+    "CODE128",
+    "CODE-39",
+    "CODE39",
+    "ITF",
+    "ITF-14",
+    "CODABAR",
+    "RSS-14",
+    "RSS_EXPANDED",
+}
+
+BLOCKED_2D_FORMATS: Set[str] = {
+    "QR CODE",
+    "QRCODE",
+    "DATA MATRIX",
+    "DATAMATRIX",
+    "AZTEC",
+    "PDF417",
+    "MAXICODE",
+}
+
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -152,6 +182,26 @@ def _normalize_text_key(txt: Any) -> Optional[str]:
     return s or None
 
 
+def _is_1d_format(fmt: Any) -> bool:
+    s = _normalize_format(fmt)
+    if not s:
+        return False
+    if s in BLOCKED_2D_FORMATS:
+        return False
+    return s in ALLOWED_1D_FORMATS
+
+
+def _filter_1d_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        if not _normalize_text(item.get("text")):
+            continue
+        if not _is_1d_format(item.get("format")):
+            continue
+        out.append(item)
+    return out
+
+
 def _build_collect_summary(
     items: List[Dict[str, Any]],
     *,
@@ -172,9 +222,9 @@ def _build_collect_summary(
     unique_texts.sort()
 
     return {
-        "total_unique": len(items),  # compatibilidad hacia atrás
-        "total_unique_items": len(items),  # dedup actual por (text, format)
-        "total_unique_texts": len(unique_texts),  # dedup por texto normalizado
+        "total_unique": len(items),
+        "total_unique_items": len(items),
+        "total_unique_texts": len(unique_texts),
         "unique_texts": unique_texts,
         "from_rois": from_rois,
         "from_tiles": from_tiles,
@@ -214,9 +264,9 @@ def _score_item(item: Dict[str, Any]) -> float:
 
     backend = _safe_str(item.get("backend"))
     if backend == "zxingcpp":
-        score += 3.0
+        score += 2.8
     elif backend == "pyzbar":
-        score += 2.0
+        score += 2.6
     elif backend == "opencv_barcode":
         score += 1.0
 
@@ -229,7 +279,9 @@ def _score_item(item: Dict[str, Any]) -> float:
         score += 0.4
 
     source = _safe_str(item.get("source"))
-    if source == "roi":
+    if source == "subroi":
+        score += 1.0
+    elif source == "roi":
         score += 0.8
     elif source == "tile":
         score += 0.55
@@ -600,72 +652,261 @@ def _augment_with_rotations(
 # ---------------------------------------------------------------------
 # ROI rescue (barcode region detection)
 # ---------------------------------------------------------------------
-def _find_barcode_rois(
+def _find_label_rois(
     img_bgr: np.ndarray,
-    max_rois: int = 3,
+    max_rois: int = 8,
 ) -> List[Tuple[np.ndarray, Dict[str, Any]]]:
     """
-    Heurística 1D:
-      - gradiente en X (barras verticales)
-      - threshold + morph close
-      - contornos grandes y con buen aspecto
-
-    Ajuste quirúrgico:
-      - ahora acepta regiones alargadas horizontales o verticales
-      - mantiene sesgo a ROIs útiles, pero no excluye códigos de pie
+    Busca etiquetas blancas / claras, típicas en cajas verdes.
     """
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape[:2]
+    h, w = img_bgr.shape[:2]
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
 
-    gx = cv2.Scharr(gray, cv2.CV_32F, 1, 0)
-    gx = cv2.convertScaleAbs(gx)
-    gx = cv2.GaussianBlur(gx, (0, 0), 2.0)
+    mask = cv2.inRange(hsv, (0, 0, 150), (180, 85, 255))
 
-    _, bw = cv2.threshold(gx, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    k1 = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+    k2 = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k1, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k1, iterations=1)
+    mask = cv2.dilate(mask, k2, iterations=1)
 
-    k = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 7))
-    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, k, iterations=2)
-    bw = cv2.erode(bw, None, iterations=1)
-    bw = cv2.dilate(bw, None, iterations=2)
-
-    cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not cnts:
         return []
 
-    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
     out: List[Tuple[np.ndarray, Dict[str, Any]]] = []
 
-    for c in cnts[:20]:
+    for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:40]:
         x, y, ww, hh = cv2.boundingRect(c)
         area = float(ww * hh)
-        if area < 0.006 * (w * h):
+
+        if area < 0.0025 * (w * h):
+            continue
+        if area > 0.30 * (w * h):
             continue
 
         aspect = ww / float(hh + 1e-6)
         aspect_inv = hh / float(ww + 1e-6)
         elongated = max(aspect, aspect_inv)
 
-        if elongated < 2.2:
+        if elongated < 1.15:
             continue
 
-        pad = int(0.08 * max(ww, hh))
+        border_touch = int(x <= 2) + int(y <= 2) + int(x + ww >= w - 2) + int(y + hh >= h - 2)
+
+        pad = int(0.12 * max(ww, hh))
         x0 = max(0, x - pad)
         y0 = max(0, y - pad)
         x1 = min(w, x + ww + pad)
         y1 = min(h, y + hh + pad)
+
         if x1 <= x0 or y1 <= y0:
             continue
 
         roi = img_bgr[y0:y1, x0:x1].copy()
-        score = area * elongated
-        meta = {"bbox": (x0, y0, x1 - x0, y1 - y0), "score": score}
-        out.append((roi, meta))
+        score = area * elongated * (1.0 if border_touch == 0 else 0.75)
+
+        out.append(
+            (
+                roi,
+                {
+                    "bbox": (x0, y0, x1 - x0, y1 - y0),
+                    "score": score,
+                    "kind": "label",
+                },
+            )
+        )
 
         if len(out) >= max_rois:
             break
 
     out.sort(key=lambda t: float(t[1].get("score", 0.0)), reverse=True)
     return out
+
+
+def _find_sub_barcode_rois(
+    roi_bgr: np.ndarray,
+    max_rois: int = 4,
+) -> List[Tuple[np.ndarray, Dict[str, Any]]]:
+    """
+    Dentro de una etiqueta/ROI grande, intenta encontrar subzonas con patrón
+    de barras antes de decodificar la ROI completa.
+    """
+    h0, w0 = roi_bgr.shape[:2]
+    if h0 < 40 or w0 < 40:
+        return []
+
+    out: List[Tuple[np.ndarray, Dict[str, Any]]] = []
+    seen: Set[Tuple[str, int, int, int, int]] = set()
+
+    oriented_inputs: List[Tuple[str, np.ndarray]] = [
+        ("orig", roi_bgr),
+        ("rot90", cv2.rotate(roi_bgr, cv2.ROTATE_90_CLOCKWISE)),
+    ]
+
+    for orient_name, img in oriented_inputs:
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+
+        gx = cv2.Scharr(gray, cv2.CV_32F, 1, 0)
+        ax = cv2.convertScaleAbs(gx)
+        ax = cv2.GaussianBlur(ax, (0, 0), 1.2)
+
+        _, bw = cv2.threshold(ax, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5))
+        k_open = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))
+        bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, k_close, iterations=2)
+        bw = cv2.morphologyEx(bw, cv2.MORPH_OPEN, k_open, iterations=1)
+        bw = cv2.dilate(bw, None, iterations=1)
+
+        cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            continue
+
+        for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:20]:
+            x, y, ww, hh = cv2.boundingRect(c)
+            area = float(ww * hh)
+
+            if area < 0.015 * (w * h):
+                continue
+            if area > 0.85 * (w * h):
+                continue
+
+            aspect = ww / float(hh + 1e-6)
+            aspect_inv = hh / float(ww + 1e-6)
+            elongated = max(aspect, aspect_inv)
+            if elongated < 1.35:
+                continue
+
+            contour_area = float(cv2.contourArea(c))
+            extent = contour_area / float(area + 1e-6)
+            if extent < 0.18:
+                continue
+
+            pad = int(0.08 * max(ww, hh))
+            x0 = max(0, x - pad)
+            y0 = max(0, y - pad)
+            x1 = min(w, x + ww + pad)
+            y1 = min(h, y + hh + pad)
+            if x1 <= x0 or y1 <= y0:
+                continue
+
+            key = (orient_name, x0, y0, x1, y1)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            crop = img[y0:y1, x0:x1].copy()
+            score = area * elongated * (1.15 if orient_name == "rot90" else 1.0)
+
+            out.append(
+                (
+                    crop,
+                    {
+                        "bbox": (x0, y0, x1 - x0, y1 - y0),
+                        "score": score,
+                        "kind": "sub_barcode",
+                        "orientation": orient_name,
+                    },
+                )
+            )
+
+            if len(out) >= max_rois:
+                break
+
+        if len(out) >= max_rois:
+            break
+
+    out.sort(key=lambda t: float(t[1].get("score", 0.0)), reverse=True)
+    return out[:max_rois]
+
+
+def _find_barcode_rois(
+    img_bgr: np.ndarray,
+    max_rois: int = 6,
+) -> List[Tuple[np.ndarray, Dict[str, Any]]]:
+    """
+    Combina:
+      1) ROIs por etiqueta blanca
+      2) ROIs por gradiente de barras
+    """
+    h, w = img_bgr.shape[:2]
+    out: List[Tuple[np.ndarray, Dict[str, Any]]] = []
+    seen: Set[Tuple[int, int, int, int]] = set()
+
+    def _add_roi(roi: np.ndarray, meta: Dict[str, Any]) -> None:
+        bbox = tuple(int(v) for v in meta.get("bbox", (0, 0, 0, 0)))
+        if bbox in seen:
+            return
+        seen.add(bbox)
+        out.append((roi, meta))
+
+    label_rois = _find_label_rois(img_bgr, max_rois=max(4, max_rois))
+    for roi, meta in label_rois:
+        _add_roi(roi, meta)
+        if len(out) >= max_rois:
+            out.sort(key=lambda t: float(t[1].get("score", 0.0)), reverse=True)
+            return out[:max_rois]
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+    gx = cv2.Scharr(gray, cv2.CV_32F, 1, 0)
+    gy = cv2.Scharr(gray, cv2.CV_32F, 0, 1)
+    g = cv2.addWeighted(cv2.convertScaleAbs(gx), 0.75, cv2.convertScaleAbs(gy), 0.25, 0)
+    g = cv2.GaussianBlur(g, (0, 0), 2.0)
+
+    _, bw = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 9))
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, k, iterations=2)
+    bw = cv2.erode(bw, None, iterations=1)
+    bw = cv2.dilate(bw, None, iterations=2)
+
+    cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if cnts:
+        for c in sorted(cnts, key=cv2.contourArea, reverse=True)[:30]:
+            x, y, ww, hh = cv2.boundingRect(c)
+            area = float(ww * hh)
+
+            if area < 0.0025 * (w * h):
+                continue
+
+            aspect = ww / float(hh + 1e-6)
+            aspect_inv = hh / float(ww + 1e-6)
+            elongated = max(aspect, aspect_inv)
+
+            if elongated < 1.8:
+                continue
+
+            pad = int(0.10 * max(ww, hh))
+            x0 = max(0, x - pad)
+            y0 = max(0, y - pad)
+            x1 = min(w, x + ww + pad)
+            y1 = min(h, y + hh + pad)
+            if x1 <= x0 or y1 <= y0:
+                continue
+
+            roi = img_bgr[y0:y1, x0:x1].copy()
+            score = area * elongated
+
+            _add_roi(
+                roi,
+                {
+                    "bbox": (x0, y0, x1 - x0, y1 - y0),
+                    "score": score,
+                    "kind": "barcode_grad",
+                },
+            )
+
+            if len(out) >= max_rois:
+                break
+
+    out.sort(key=lambda t: float(t[1].get("score", 0.0)), reverse=True)
+    return out[:max_rois]
 
 
 def _generate_multibarcode_tiles(
@@ -709,10 +950,13 @@ def _generate_multibarcode_tiles(
 # ---------------------------------------------------------------------
 def _run_backend(be: str, gray: np.ndarray) -> List[Dict[str, Any]]:
     if be == "zxingcpp":
-        return _try_zxingcpp(gray)
-    if be == "pyzbar":
-        return _try_pyzbar(gray)
-    return _try_opencv_barcode(gray)
+        items = _try_zxingcpp(gray)
+    elif be == "pyzbar":
+        items = _try_pyzbar(gray)
+    else:
+        items = _try_opencv_barcode(gray)
+
+    return _filter_1d_items(items)
 
 
 def _prepare_variants(
@@ -821,13 +1065,6 @@ def _decode_barcode_core_collect(
 
     ims, to_try = _prepare_variants(img_bgr, variants)
 
-    strong_rotation_candidates = {
-        "sharp_x4_local",
-        "gray_x4_local",
-        "sharp_x3_local",
-        "gray_x3_local",
-    }
-
     for vname in to_try:
         if (time.perf_counter() - stage_t0) * 1000 > time_budget_ms:
             break
@@ -838,6 +1075,22 @@ def _decode_barcode_core_collect(
 
         candidates: List[Tuple[str, np.ndarray]] = [(vname, base)]
         candidates.extend(_extra_candidates(base))
+
+        strong_rotation_candidates = {
+            vname,
+            "gray",
+            "sharp",
+            "bilateral",
+            "bilateral_sharp",
+            "bw",
+            "bw_x2",
+            "sharp_x4_local",
+            "gray_x4_local",
+            "sharp_x3_local",
+            "gray_x3_local",
+            "sharp_local",
+            "gray_local",
+        }
 
         candidates = _augment_with_rotations(
             candidates,
@@ -894,6 +1147,153 @@ def _decode_barcode_core_collect(
     }
 
 
+def _decode_roi_with_subrois_fast(
+    roi_bgr: np.ndarray,
+    *,
+    t0: float,
+    total_budget_ms: int,
+    variants: Optional[Union[List[str], str]],
+    backend_order: List[str],
+    roi_index: int,
+    roi_bbox: Optional[Tuple[int, int, int, int]],
+    roi_score: Optional[float],
+    roi_upscale: float,
+) -> Dict[str, Any]:
+    work_roi = roi_bgr
+    if roi_upscale > 1.0:
+        work_roi = cv2.resize(
+            work_roi,
+            None,
+            fx=roi_upscale,
+            fy=roi_upscale,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+    sub_rois = _find_sub_barcode_rois(work_roi, max_rois=4)
+
+    if sub_rois:
+        per_sub_budget = max(120, min(420, total_budget_ms // max(1, len(sub_rois) + 1)))
+        for sidx, (sub_bgr, smeta) in enumerate(sub_rois):
+            if (time.perf_counter() - t0) * 1000 > total_budget_ms:
+                break
+
+            res_sub = _decode_barcode_core_fast(
+                sub_bgr,
+                t0=t0,
+                time_budget_ms=per_sub_budget,
+                variants=variants,
+                backend_order=backend_order,
+                source="subroi",
+                roi_index=roi_index,
+                roi_bbox=roi_bbox,
+                roi_score=max(float(roi_score or 0.0), float(smeta.get("score", 0.0))),
+            )
+            if res_sub.get("status") == "success":
+                return res_sub
+
+    return _decode_barcode_core_fast(
+        work_roi,
+        t0=t0,
+        time_budget_ms=total_budget_ms,
+        variants=variants,
+        backend_order=backend_order,
+        source="roi",
+        roi_index=roi_index,
+        roi_bbox=roi_bbox,
+        roi_score=roi_score,
+    )
+
+
+def _decode_roi_with_subrois_collect(
+    roi_bgr: np.ndarray,
+    *,
+    t0: float,
+    total_budget_ms: int,
+    variants: Optional[Union[List[str], str]],
+    backend_order: List[str],
+    roi_index: int,
+    roi_bbox: Optional[Tuple[int, int, int, int]],
+    roi_score: Optional[float],
+    roi_upscale: float,
+    max_collect_items: int,
+    enable_rotations: bool,
+) -> Dict[str, Any]:
+    work_roi = roi_bgr
+    if roi_upscale > 1.0:
+        work_roi = cv2.resize(
+            work_roi,
+            None,
+            fx=roi_upscale,
+            fy=roi_upscale,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+    aggregate: List[Dict[str, Any]] = []
+    tried: List[str] = []
+
+    sub_rois = _find_sub_barcode_rois(work_roi, max_rois=4)
+    if sub_rois:
+        per_sub_budget = max(160, min(520, total_budget_ms // max(1, len(sub_rois) + 1)))
+        for _, (sub_bgr, smeta) in enumerate(sub_rois):
+            if (time.perf_counter() - t0) * 1000 > total_budget_ms:
+                break
+
+            res_sub = _decode_barcode_core_collect(
+                sub_bgr,
+                t0=t0,
+                time_budget_ms=per_sub_budget,
+                variants=variants,
+                backend_order=backend_order,
+                source="subroi",
+                roi_index=roi_index,
+                roi_bbox=roi_bbox,
+                roi_score=max(float(roi_score or 0.0), float(smeta.get("score", 0.0))),
+                max_collect_items=max_collect_items,
+                enable_rotations=enable_rotations,
+            )
+            tried.extend(res_sub.get("tried", []))
+            aggregate = _merge_items(aggregate, res_sub.get("items", []))
+            if len(aggregate) >= max_collect_items:
+                return {
+                    "status": "success",
+                    "items": aggregate,
+                    "backend": None,
+                    "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+                    "variant": None,
+                    "candidate": None,
+                    "source": "subroi",
+                    "tried": tried,
+                }
+
+    remain = max(120, int(total_budget_ms - (time.perf_counter() - t0) * 1000))
+    res_roi = _decode_barcode_core_collect(
+        work_roi,
+        t0=t0,
+        time_budget_ms=remain,
+        variants=variants,
+        backend_order=backend_order,
+        source="roi",
+        roi_index=roi_index,
+        roi_bbox=roi_bbox,
+        roi_score=roi_score,
+        max_collect_items=max_collect_items,
+        enable_rotations=enable_rotations,
+    )
+    tried.extend(res_roi.get("tried", []))
+    aggregate = _merge_items(aggregate, res_roi.get("items", []))
+
+    return {
+        "status": "success" if aggregate else "not_found",
+        "items": aggregate,
+        "backend": None,
+        "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+        "variant": None,
+        "candidate": None,
+        "source": "roi",
+        "tried": tried,
+    }
+
+
 # ---------------------------------------------------------------------
 # Public API - mode 1 (fast)
 # ---------------------------------------------------------------------
@@ -936,32 +1336,23 @@ def decode_barcode_1d_fast(
             }
 
         if enable_roi_rescue:
-            roi_budget = min(260, max(120, time_budget_ms // 2))
+            roi_budget = min(520, max(180, time_budget_ms // 2))
             rois = _find_barcode_rois(img_bgr, max_rois=max_rois)
 
             for idx, (roi_bgr, meta) in enumerate(rois):
                 if (time.perf_counter() - t0) * 1000 > time_budget_ms:
                     break
 
-                if roi_upscale > 1.0:
-                    roi_bgr = cv2.resize(
-                        roi_bgr,
-                        None,
-                        fx=roi_upscale,
-                        fy=roi_upscale,
-                        interpolation=cv2.INTER_CUBIC,
-                    )
-
-                res_roi = _decode_barcode_core_fast(
+                res_roi = _decode_roi_with_subrois_fast(
                     roi_bgr,
                     t0=t0,
-                    time_budget_ms=min(time_budget_ms, roi_budget),
+                    total_budget_ms=min(time_budget_ms, roi_budget),
                     variants=variants,
                     backend_order=backend_order,
-                    source="roi",
                     roi_index=idx,
                     roi_bbox=meta.get("bbox"),
                     roi_score=meta.get("score"),
+                    roi_upscale=roi_upscale,
                 )
                 if res_roi.get("status") == "success":
                     res_roi["mode"] = "fast"
@@ -1051,7 +1442,7 @@ def decode_barcode_1d_collect(
 
             roi_stage_ratio = max(0.10, min(float(roi_stage_ratio), 0.90))
             roi_budget_total = int(time_budget_ms * roi_stage_ratio) if include_full_image else time_budget_ms
-            roi_budget_total = max(150, roi_budget_total)
+            roi_budget_total = max(200, roi_budget_total)
 
             roi_stage_t0 = time.perf_counter()
 
@@ -1068,27 +1459,18 @@ def decode_barcode_1d_collect(
                 if remain_total <= 0 or remain_roi_stage <= 0:
                     break
 
-                per_roi_budget = max(90, min(220, remain_roi_stage // max(1, (len(rois) - idx))))
+                per_roi_budget = max(220, min(700, remain_roi_stage // max(1, (len(rois) - idx))))
 
-                if roi_upscale > 1.0:
-                    roi_bgr = cv2.resize(
-                        roi_bgr,
-                        None,
-                        fx=roi_upscale,
-                        fy=roi_upscale,
-                        interpolation=cv2.INTER_CUBIC,
-                    )
-
-                res_roi = _decode_barcode_core_collect(
+                res_roi = _decode_roi_with_subrois_collect(
                     roi_bgr,
                     t0=t0,
-                    time_budget_ms=min(remain_total, per_roi_budget),
+                    total_budget_ms=min(remain_total, per_roi_budget),
                     variants=variants,
                     backend_order=backend_order,
-                    source="roi",
                     roi_index=idx,
                     roi_bbox=meta.get("bbox"),
                     roi_score=meta.get("score"),
+                    roi_upscale=roi_upscale,
                     max_collect_items=max_collect_items,
                     enable_rotations=enable_collect_rotations,
                 )
@@ -1125,7 +1507,7 @@ def decode_barcode_1d_collect(
                     break
 
                 remain_total = max(1, int(time_budget_ms - (time.perf_counter() - t0) * 1000))
-                per_tile_budget = max(90, min(180, remain_total // max(1, (len(tiles) - tidx + 1))))
+                per_tile_budget = max(120, min(280, remain_total // max(1, (len(tiles) - tidx + 1))))
 
                 res_tile = _decode_barcode_core_collect(
                     tile_bgr,
@@ -1205,7 +1587,7 @@ def decode_barcode_1d_collect(
 def decode_barcode_1d(
     img_bgr: np.ndarray,
     *,
-    mode: str = "fast",  # "fast" | "collect"
+    mode: str = "fast",
     time_budget_ms: Optional[int] = None,
     variants: Optional[Union[List[str], str]] = None,
     prefer: str = "zxingcpp",

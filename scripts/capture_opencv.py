@@ -233,8 +233,8 @@ def capture_auto_window(
     interval_s: float,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """
-    Captura una secuencia temporal después del trigger:
-    1 frame cada interval_s durante duration_s.
+    Mantenida solo por compatibilidad / referencia.
+    En el flujo principal ya no se usa de forma bloqueante.
     """
     records: List[Dict[str, Any]] = []
 
@@ -501,6 +501,16 @@ def main() -> None:
     recent_buffer_size = max(3, int(args.manual_buffer))
     recent_frames: Deque[Dict[str, Any]] = deque(maxlen=recent_buffer_size)
 
+    # Estado para auto-window no bloqueante
+    pending_auto_capture = False
+    pending_event_id: Optional[int] = None
+    pending_auto_metrics: Optional[Dict[str, Any]] = None
+    pending_trigger_idx: Optional[int] = None
+    pending_trigger_frame = None
+    pending_records: List[Dict[str, Any]] = []
+    pending_start_t = 0.0
+    pending_next_capture_t = 0.0
+
     try:
         while True:
             ok, frame = cap.read()
@@ -628,35 +638,79 @@ def main() -> None:
                 event_id += 1
 
                 if args.auto_use_window_capture:
-                    burst_records, idx = capture_auto_window(
-                        cap=cap,
-                        idx_start=idx,
-                        duration_s=float(args.auto_window_s),
-                        interval_s=float(args.auto_interval_s),
-                    )
-                    trigger_name = "auto_window"
+                    pending_auto_capture = True
+                    pending_event_id = event_id
+                    pending_auto_metrics = auto_metrics
+                    pending_trigger_idx = idx
+                    pending_trigger_frame = frame.copy()
+                    pending_records = []
+                    pending_start_t = time.time()
+                    pending_next_capture_t = pending_start_t
+                    print(f"[AUTO] Trigger #{event_id} iniciado | window={args.auto_window_s:.1f}s")
                 else:
-                    burst_records = None
-                    trigger_name = "auto"
+                    ev_dir = save_event(
+                        frame_dir=frame_dir,
+                        events_dir=events_dir,
+                        event_id=event_id,
+                        frame=frame,
+                        idx=idx,
+                        roi=roi,
+                        trigger="auto",
+                        auto_metrics=auto_metrics,
+                        burst_records=None,
+                    )
+                    session["events"]["counts"]["total"] += 1
+                    session["events"]["counts"]["auto"] += 1
+                    safe_write_json(session_path, session)
+                    print(f"[AUTO] Evento #{event_id} guardado: {ev_dir}")
 
-                frame_for_event = burst_records[0]["frame"] if burst_records else frame
-                idx_for_event = burst_records[0]["idx"] if burst_records else idx
+            if pending_auto_capture:
+                now_cap = time.time()
 
-                ev_dir = save_event(
-                    frame_dir=frame_dir,
-                    events_dir=events_dir,
-                    event_id=event_id,
-                    frame=frame_for_event,
-                    idx=idx_for_event,
-                    roi=roi,
-                    trigger=trigger_name,
-                    auto_metrics=auto_metrics,
-                    burst_records=burst_records,
-                )
-                session["events"]["counts"]["total"] += 1
-                session["events"]["counts"]["auto"] += 1
-                safe_write_json(session_path, session)
-                print(f"[AUTO] Evento #{event_id} guardado: {ev_dir}")
+                if now_cap >= pending_next_capture_t:
+                    pending_records.append(
+                        frame_record(
+                            idx=idx,
+                            frame=frame,
+                            epoch_ms=int(time.time() * 1000),
+                        )
+                    )
+                    pending_next_capture_t += float(args.auto_interval_s)
+
+                if (now_cap - pending_start_t) >= float(args.auto_window_s):
+                    if pending_records:
+                        mid = len(pending_records) // 2
+                        frame_for_event = pending_records[mid]["frame"]
+                        idx_for_event = pending_records[mid]["idx"]
+                    else:
+                        frame_for_event = pending_trigger_frame if pending_trigger_frame is not None else frame
+                        idx_for_event = pending_trigger_idx if pending_trigger_idx is not None else idx
+
+                    ev_dir = save_event(
+                        frame_dir=frame_dir,
+                        events_dir=events_dir,
+                        event_id=int(pending_event_id),
+                        frame=frame_for_event,
+                        idx=int(idx_for_event),
+                        roi=roi,
+                        trigger="auto_window",
+                        auto_metrics=pending_auto_metrics,
+                        burst_records=pending_records,
+                    )
+
+                    session["events"]["counts"]["total"] += 1
+                    session["events"]["counts"]["auto"] += 1
+                    safe_write_json(session_path, session)
+                    print(f"[AUTO] Evento #{pending_event_id} guardado: {ev_dir} | burst={len(pending_records)}")
+
+                    pending_auto_capture = False
+                    pending_event_id = None
+                    pending_auto_metrics = None
+                    pending_trigger_idx = None
+                    pending_trigger_frame = None
+                    pending_records = []
+                    pending_start_t = 0.0
+                    pending_next_capture_t = 0.0
 
             if idx % fps_win == 0:
                 session["runtime"]["fps_real_last"] = (round(fps_real, 2) if fps_real is not None else None)
@@ -711,16 +765,29 @@ def main() -> None:
                         )
 
                     if args.auto_use_window_capture:
-                        cv2.putText(
-                            disp,
-                            f"AUTO_WINDOW {args.auto_window_s:.1f}s / {args.auto_interval_s:.2f}s",
-                            (10, 90),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.62,
-                            (255, 200, 0),
-                            2,
-                            cv2.LINE_AA,
-                        )
+                        if pending_auto_capture:
+                            remaining = max(0.0, float(args.auto_window_s) - (time.time() - pending_start_t))
+                            cv2.putText(
+                                disp,
+                                f"AUTO_WINDOW REC {remaining:.1f}s burst={len(pending_records)}",
+                                (10, 90),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.62,
+                                (0, 128, 255),
+                                2,
+                                cv2.LINE_AA,
+                            )
+                        else:
+                            cv2.putText(
+                                disp,
+                                f"AUTO_WINDOW {args.auto_window_s:.1f}s / {args.auto_interval_s:.2f}s",
+                                (10, 90),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.62,
+                                (255, 200, 0),
+                                2,
+                                cv2.LINE_AA,
+                            )
 
                 cv2.imshow("Capture (OpenCV)", disp)
                 key = cv2.waitKey(1) & 0xFF

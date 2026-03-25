@@ -23,7 +23,11 @@ except Exception as e:
 # -----------------------------
 # RealSense helpers
 # -----------------------------
-def open_realsense(width: int, height: int, fps: int):
+def open_realsense(
+    width: int,
+    height: int,
+    fps: int,
+) -> Tuple[Any, Any, str, Optional[str], Optional[Any]]:
     pipeline = rs.pipeline()
     config = rs.config()
     config.enable_stream(rs.stream.color, int(width), int(height), rs.format.bgr8, int(fps))
@@ -37,10 +41,11 @@ def open_realsense(width: int, height: int, fps: int):
     color_sensor = None
     try:
         sensors = device.query_sensors()
-        for s in sensors:
+        for sensor in sensors:
             try:
-                if s.get_info(rs.camera_info.name).lower().find("color") >= 0:
-                    color_sensor = s
+                sensor_name = str(sensor.get_info(rs.camera_info.name)).lower()
+                if "color" in sensor_name:
+                    color_sensor = sensor
                     break
             except Exception:
                 continue
@@ -51,11 +56,11 @@ def open_realsense(width: int, height: int, fps: int):
 
 
 def warmup_read_rs(
-    pipeline,
+    pipeline: Any,
     tries: int = 90,
     sleep_s: float = 0.03,
-):
-    last = None
+) -> Tuple[bool, Optional[np.ndarray]]:
+    last: Optional[np.ndarray] = None
     for _ in range(tries):
         try:
             frames = pipeline.wait_for_frames(timeout_ms=2000)
@@ -71,18 +76,20 @@ def warmup_read_rs(
     return False, last
 
 
-def read_frame_rs(pipeline):
+def read_frame_rs(pipeline: Any) -> Tuple[bool, Optional[np.ndarray]]:
     frames = pipeline.wait_for_frames(timeout_ms=2000)
     color_frame = frames.get_color_frame()
     if not color_frame:
         return False, None
+
     img = np.asanyarray(color_frame.get_data())
     if img is None or img.size == 0:
         return False, None
+
     return True, img
 
 
-def get_rs_stream_info(profile) -> Dict[str, Any]:
+def get_rs_stream_info(profile: Any) -> Dict[str, Any]:
     info: Dict[str, Any] = {
         "stream": "color",
         "format": None,
@@ -113,28 +120,35 @@ def safe_write_json(path: Path, payload: dict) -> None:
     tmp.replace(path)
 
 
-def crop_roi(img, roi: Optional[Tuple[int, int, int, int]]):
+def crop_roi(
+    img: np.ndarray,
+    roi: Optional[Tuple[int, int, int, int]],
+) -> Optional[np.ndarray]:
     if roi is None:
         return None
+
     x, y, rw, rh = roi
     x = max(0, int(x))
     y = max(0, int(y))
     rw = max(1, int(rw))
     rh = max(1, int(rh))
+
     x2 = min(img.shape[1], x + rw)
     y2 = min(img.shape[0], y + rh)
+
     if x >= x2 or y >= y2:
         return None
+
     return img[y:y2, x:x2].copy()
 
 
-def to_gray_blur(img):
-    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    g = cv2.GaussianBlur(g, (7, 7), 0)
-    return g
+def to_gray_blur(img: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (7, 7), 0)
+    return gray
 
 
-def motion_ratio(prev_gray, curr_gray, thresh: int = 25) -> float:
+def motion_ratio(prev_gray: np.ndarray, curr_gray: np.ndarray, thresh: int = 25) -> float:
     diff = cv2.absdiff(prev_gray, curr_gray)
     _, bw = cv2.threshold(diff, thresh, 255, cv2.THRESH_BINARY)
     changed = cv2.countNonZero(bw)
@@ -142,7 +156,7 @@ def motion_ratio(prev_gray, curr_gray, thresh: int = 25) -> float:
     return changed / max(1, total)
 
 
-def frame_record(idx: int, frame, epoch_ms: int) -> Dict[str, Any]:
+def frame_record(idx: int, frame: np.ndarray, epoch_ms: int) -> Dict[str, Any]:
     return {
         "idx": int(idx),
         "epoch_ms": int(epoch_ms),
@@ -159,7 +173,7 @@ def save_burst_frames(
     frames_dir = ev_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_frames = []
+    saved_frames: List[Dict[str, Any]] = []
     for i, rec in enumerate(burst_records, start=1):
         fp = frames_dir / f"frame_{i:02d}.jpg"
         cv2.imwrite(str(fp), rec["frame"])
@@ -172,7 +186,7 @@ def save_burst_frames(
             }
         )
 
-    roi_paths = []
+    roi_paths: List[Dict[str, Any]] = []
     if roi:
         roi_dir = ev_dir / "roi_frames"
         roi_dir.mkdir(parents=True, exist_ok=True)
@@ -191,6 +205,7 @@ def save_burst_frames(
 
     mid_idx = len(saved_frames) // 2 if saved_frames else 0
     main_frame_path = saved_frames[mid_idx]["path"] if saved_frames else None
+
     main_roi_path = None
     if roi_paths:
         mid_roi_idx = len(roi_paths) // 2
@@ -206,10 +221,9 @@ def save_burst_frames(
 
 def save_event(
     *,
-    frame_dir: Path,
     events_dir: Path,
     event_id: int,
-    frame,
+    frame: np.ndarray,
     idx: int,
     roi: Optional[Tuple[int, int, int, int]],
     trigger: str,
@@ -277,11 +291,15 @@ def save_event(
 
 def capture_auto_window_rs(
     *,
-    pipeline,
+    pipeline: Any,
     idx_start: int,
     duration_s: float,
     interval_s: float,
 ) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Mantenida solo por compatibilidad / referencia.
+    En el flujo principal ya no se usa de forma bloqueante.
+    """
     records: List[Dict[str, Any]] = []
 
     duration_s = max(0.5, float(duration_s))
@@ -316,9 +334,133 @@ def capture_auto_window_rs(
     return records, idx
 
 
-# -----------------------------
-# Main
-# -----------------------------
+def update_auto_trigger_motion(
+    *,
+    roi_img: np.ndarray,
+    prev_gray: Optional[np.ndarray],
+    armed: bool,
+    stable_count: int,
+    enter_thr: float,
+    stable_thr: float,
+    stable_frames: int,
+) -> Tuple[bool, Optional[Dict[str, Any]], np.ndarray, bool, int, Optional[float]]:
+    auto_trigger = False
+    auto_metrics = None
+    last_motion: Optional[float] = None
+
+    curr = to_gray_blur(roi_img)
+
+    if prev_gray is not None:
+        mr = motion_ratio(prev_gray, curr)
+        last_motion = mr
+
+        if mr > enter_thr:
+            armed = True
+            stable_count = 0
+
+        if armed and mr < stable_thr:
+            stable_count += 1
+        else:
+            stable_count = 0
+
+        if armed and stable_count >= stable_frames:
+            auto_trigger = True
+            auto_metrics = {
+                "method": "motion",
+                "motion_ratio": float(mr),
+                "enter_thr": float(enter_thr),
+                "stable_thr": float(stable_thr),
+                "stable_frames": int(stable_frames),
+            }
+            armed = False
+            stable_count = 0
+
+    return auto_trigger, auto_metrics, curr, armed, stable_count, last_motion
+
+
+def update_auto_trigger_bg(
+    *,
+    roi_img: np.ndarray,
+    bg_sub: Any,
+    bg_warmup_left: int,
+    present_count: int,
+    armed: bool,
+    min_fg_ratio: float,
+    min_contour_area: int,
+    present_frames: int,
+    bg_warmup: int,
+    bg_history: int,
+    bg_var_threshold: int,
+    bg_detect_shadows: bool,
+    morph_kernel: np.ndarray,
+) -> Tuple[
+    bool,
+    Optional[Dict[str, Any]],
+    int,
+    int,
+    bool,
+    Optional[float],
+    Optional[int],
+]:
+    auto_trigger = False
+    auto_metrics = None
+    last_fg_ratio: Optional[float] = None
+    last_max_area: Optional[int] = None
+
+    fg = bg_sub.apply(roi_img)
+
+    if bg_warmup_left > 0:
+        bg_warmup_left -= 1
+        present_count = 0
+        armed = True
+        return auto_trigger, auto_metrics, bg_warmup_left, present_count, armed, last_fg_ratio, last_max_area
+
+    _, fg = cv2.threshold(fg, 200, 255, cv2.THRESH_BINARY)
+    fg = cv2.medianBlur(fg, 5)
+    fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, morph_kernel, iterations=1)
+    fg = cv2.morphologyEx(fg, cv2.MORPH_DILATE, morph_kernel, iterations=1)
+
+    fg_pixels = cv2.countNonZero(fg)
+    total = fg.shape[0] * fg.shape[1]
+    fg_ratio = fg_pixels / max(1, total)
+    last_fg_ratio = fg_ratio
+
+    contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    max_area = 0
+    for contour in contours:
+        area = int(cv2.contourArea(contour))
+        if area > max_area:
+            max_area = area
+    last_max_area = max_area
+
+    present = (fg_ratio >= float(min_fg_ratio)) or (max_area >= int(min_contour_area))
+
+    if present:
+        present_count += 1
+    else:
+        present_count = 0
+        armed = True
+
+    if armed and present_count >= int(present_frames):
+        auto_trigger = True
+        auto_metrics = {
+            "method": "bg",
+            "fg_ratio": float(fg_ratio),
+            "max_contour_area": int(max_area),
+            "min_fg_ratio": float(min_fg_ratio),
+            "min_contour_area": int(min_contour_area),
+            "present_frames": int(present_frames),
+            "bg_warmup": int(bg_warmup),
+            "bg_history": int(bg_history),
+            "bg_var_threshold": int(bg_var_threshold),
+            "detect_shadows": bool(bg_detect_shadows),
+        }
+        armed = False
+        present_count = 0
+
+    return auto_trigger, auto_metrics, bg_warmup_left, present_count, armed, last_fg_ratio, last_max_area
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
 
@@ -406,15 +548,26 @@ def main() -> None:
     roi: Optional[Tuple[int, int, int, int]] = tuple(args.roi) if args.roi else None
 
     pipeline = None
+    profile = None
     writer = None
 
+    frame_dir: Optional[Path] = None
+    events_dir: Optional[Path] = None
+    session_path: Optional[Path] = None
+
+    session: Dict[str, Any] = {}
+    idx = 0
+    saved = 0
+    manual_saved = 0
+    fps_real: Optional[float] = None
+
+    morph_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+
     try:
-        pipeline, profile, device_name, serial, color_sensor = open_realsense(
-            args.width, args.height, args.fps
-        )
+        pipeline, profile, device_name, serial, color_sensor = open_realsense(args.width, args.height, args.fps)
 
         ok, frame = warmup_read_rs(pipeline)
-        if not ok:
+        if not ok or frame is None:
             raise SystemExit("Warm-up falló con RealSense. Verifica cámara, cable, permisos y resolución/FPS.")
 
         h, w = frame.shape[:2]
@@ -426,8 +579,8 @@ def main() -> None:
             print(f"[INFO] Serial: {serial}")
         print(f"[INFO] Stream color: {stream_info}")
 
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        frame_dir = out_dir / f"frames_{ts}"
+        frame_ts = time.strftime("%Y%m%d_%H%M%S")
+        frame_dir = out_dir / f"frames_{frame_ts}"
         frame_dir.mkdir(parents=True, exist_ok=True)
         print(f"[INFO] Guardando en: {frame_dir}")
 
@@ -445,8 +598,8 @@ def main() -> None:
                     print("[WARN] auto_events sin ROI: funcionará, pero para PoC industrial se recomienda ROI en el mesón.")
 
         session_path = frame_dir / "session.json"
-        session: Dict[str, Any] = {
-            "session_id": ts,
+        session = {
+            "session_id": frame_ts,
             "start_time_local": time.strftime("%Y-%m-%d %H:%M:%S"),
             "start_time_epoch": time.time(),
             "camera": {
@@ -496,7 +649,7 @@ def main() -> None:
 
         if args.save_video:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            video_path = frame_dir / f"capture_{ts}.mp4"
+            video_path = frame_dir / f"capture_{frame_ts}.mp4"
             writer = cv2.VideoWriter(str(video_path), fourcc, args.fps, (w, h))
             if not writer.isOpened():
                 print("[WARN] VideoWriter mp4v falló. Continuaré sin video.")
@@ -514,21 +667,15 @@ def main() -> None:
         else:
             print("[INFO] Headless: Ctrl+C para salir")
 
-        idx = 0
-        saved = 0
-        manual_saved = 0
-
         fps_win = max(5, int(args.fps_window))
         win_start_t = time.time()
         win_start_idx = 0
-        fps_real: Optional[float] = None
 
         event_id = 0
-
         cooldown_until = 0.0
         armed = True
 
-        prev_gray = None
+        prev_gray: Optional[np.ndarray] = None
         stable_count = 0
         last_motion: Optional[float] = None
 
@@ -548,11 +695,21 @@ def main() -> None:
         recent_buffer_size = max(3, int(args.manual_buffer))
         recent_frames: Deque[Dict[str, Any]] = deque(maxlen=recent_buffer_size)
 
+        # Estado para auto-window no bloqueante
+        pending_auto_capture = False
+        pending_event_id: Optional[int] = None
+        pending_auto_metrics: Optional[Dict[str, Any]] = None
+        pending_trigger_idx: Optional[int] = None
+        pending_trigger_frame: Optional[np.ndarray] = None
+        pending_records: List[Dict[str, Any]] = []
+        pending_start_t = 0.0
+        pending_next_capture_t = 0.0
+
         while True:
             ok, frame = read_frame_rs(pipeline)
             if not ok or frame is None:
                 ok2, frame2 = warmup_read_rs(pipeline, tries=10, sleep_s=0.02)
-                if not ok2:
+                if not ok2 or frame2 is None:
                     print("[WARN] No pude leer frame desde RealSense; saliendo.")
                     break
                 frame = frame2
@@ -588,123 +745,128 @@ def main() -> None:
                     roi_img = crop_roi(frame, roi) if roi else frame
                     if roi_img is not None and roi_img.size > 0:
                         if args.auto_method == "motion":
-                            curr = to_gray_blur(roi_img)
-                            if prev_gray is not None:
-                                mr = motion_ratio(prev_gray, curr)
-                                last_motion = mr
-
-                                if mr > args.enter_thr:
-                                    armed = True
-                                    stable_count = 0
-
-                                if armed and mr < args.stable_thr:
-                                    stable_count += 1
-                                else:
-                                    stable_count = 0
-
-                                if armed and stable_count >= args.stable_frames:
-                                    auto_trigger = True
-                                    auto_metrics = {
-                                        "method": "motion",
-                                        "motion_ratio": float(mr),
-                                        "enter_thr": float(args.enter_thr),
-                                        "stable_thr": float(args.stable_thr),
-                                        "stable_frames": int(args.stable_frames),
-                                    }
-                                    armed = False
-                                    stable_count = 0
-                                    cooldown_until = time.time() + float(args.cooldown_s)
-
-                            prev_gray = curr
-
+                            (
+                                auto_trigger,
+                                auto_metrics,
+                                prev_gray,
+                                armed,
+                                stable_count,
+                                last_motion,
+                            ) = update_auto_trigger_motion(
+                                roi_img=roi_img,
+                                prev_gray=prev_gray,
+                                armed=armed,
+                                stable_count=stable_count,
+                                enter_thr=float(args.enter_thr),
+                                stable_thr=float(args.stable_thr),
+                                stable_frames=int(args.stable_frames),
+                            )
                         else:
                             assert bg_sub is not None
+                            (
+                                auto_trigger,
+                                auto_metrics,
+                                bg_warmup_left,
+                                present_count,
+                                armed,
+                                last_fg_ratio,
+                                last_max_area,
+                            ) = update_auto_trigger_bg(
+                                roi_img=roi_img,
+                                bg_sub=bg_sub,
+                                bg_warmup_left=bg_warmup_left,
+                                present_count=present_count,
+                                armed=armed,
+                                min_fg_ratio=float(args.min_fg_ratio),
+                                min_contour_area=int(args.min_contour_area),
+                                present_frames=int(args.present_frames),
+                                bg_warmup=int(args.bg_warmup),
+                                bg_history=int(args.bg_history),
+                                bg_var_threshold=int(args.bg_var_threshold),
+                                bg_detect_shadows=bool(args.bg_detect_shadows),
+                                morph_kernel=morph_kernel,
+                            )
 
-                            fg = bg_sub.apply(roi_img)
-                            if bg_warmup_left > 0:
-                                bg_warmup_left -= 1
-                                present_count = 0
-                                armed = True
-                            else:
-                                _, fg = cv2.threshold(fg, 200, 255, cv2.THRESH_BINARY)
-                                fg = cv2.medianBlur(fg, 5)
-                                fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, None, iterations=1)
-                                fg = cv2.morphologyEx(fg, cv2.MORPH_DILATE, None, iterations=1)
-
-                                fg_pixels = cv2.countNonZero(fg)
-                                total = fg.shape[0] * fg.shape[1]
-                                fg_ratio = fg_pixels / max(1, total)
-                                last_fg_ratio = fg_ratio
-
-                                contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                max_area = 0
-                                for c in contours:
-                                    a = int(cv2.contourArea(c))
-                                    if a > max_area:
-                                        max_area = a
-                                last_max_area = max_area
-
-                                present = (fg_ratio >= float(args.min_fg_ratio)) or (max_area >= int(args.min_contour_area))
-
-                                if present:
-                                    present_count += 1
-                                else:
-                                    present_count = 0
-                                    armed = True
-
-                                if armed and present_count >= int(args.present_frames):
-                                    auto_trigger = True
-                                    auto_metrics = {
-                                        "method": "bg",
-                                        "fg_ratio": float(fg_ratio),
-                                        "max_contour_area": int(max_area),
-                                        "min_fg_ratio": float(args.min_fg_ratio),
-                                        "min_contour_area": int(args.min_contour_area),
-                                        "present_frames": int(args.present_frames),
-                                        "bg_warmup": int(args.bg_warmup),
-                                        "bg_history": int(args.bg_history),
-                                        "bg_var_threshold": int(args.bg_var_threshold),
-                                        "detect_shadows": bool(args.bg_detect_shadows),
-                                    }
-                                    armed = False
-                                    present_count = 0
-                                    cooldown_until = time.time() + float(args.cooldown_s)
+                        if auto_trigger:
+                            cooldown_until = time.time() + float(args.cooldown_s)
 
             if auto_trigger and args.events:
                 event_id += 1
 
                 if args.auto_use_window_capture:
-                    burst_records, idx = capture_auto_window_rs(
-                        pipeline=pipeline,
-                        idx_start=idx,
-                        duration_s=float(args.auto_window_s),
-                        interval_s=float(args.auto_interval_s),
-                    )
-                    trigger_name = "auto_window"
+                    pending_auto_capture = True
+                    pending_event_id = event_id
+                    pending_auto_metrics = auto_metrics
+                    pending_trigger_idx = idx
+                    pending_trigger_frame = frame.copy()
+                    pending_records = []
+                    pending_start_t = time.time()
+                    pending_next_capture_t = pending_start_t
+                    print(f"[AUTO] Trigger #{event_id} iniciado | window={args.auto_window_s:.1f}s")
                 else:
-                    burst_records = None
-                    trigger_name = "auto"
+                    ev_dir = save_event(
+                        events_dir=events_dir,
+                        event_id=event_id,
+                        frame=frame,
+                        idx=idx,
+                        roi=roi,
+                        trigger="auto",
+                        auto_metrics=auto_metrics,
+                        burst_records=None,
+                    )
+                    session["events"]["counts"]["total"] += 1
+                    session["events"]["counts"]["auto"] += 1
+                    safe_write_json(session_path, session)
+                    print(f"[AUTO] Evento #{event_id} guardado: {ev_dir}")
 
-                frame_for_event = burst_records[0]["frame"] if burst_records else frame
-                idx_for_event = burst_records[0]["idx"] if burst_records else idx
+            if pending_auto_capture:
+                now_cap = time.time()
 
-                ev_dir = save_event(
-                    frame_dir=frame_dir,
-                    events_dir=events_dir,
-                    event_id=event_id,
-                    frame=frame_for_event,
-                    idx=idx_for_event,
-                    roi=roi,
-                    trigger=trigger_name,
-                    auto_metrics=auto_metrics,
-                    burst_records=burst_records,
-                )
-                session["events"]["counts"]["total"] += 1
-                session["events"]["counts"]["auto"] += 1
-                safe_write_json(session_path, session)
-                print(f"[AUTO] Evento #{event_id} guardado: {ev_dir}")
+                if now_cap >= pending_next_capture_t:
+                    pending_records.append(
+                        frame_record(
+                            idx=idx,
+                            frame=frame,
+                            epoch_ms=int(time.time() * 1000),
+                        )
+                    )
+                    pending_next_capture_t += float(args.auto_interval_s)
 
-            if idx % fps_win == 0:
+                if (now_cap - pending_start_t) >= float(args.auto_window_s):
+                    if pending_records:
+                        mid = len(pending_records) // 2
+                        frame_for_event = pending_records[mid]["frame"]
+                        idx_for_event = pending_records[mid]["idx"]
+                    else:
+                        frame_for_event = pending_trigger_frame if pending_trigger_frame is not None else frame
+                        idx_for_event = pending_trigger_idx if pending_trigger_idx is not None else idx
+
+                    ev_dir = save_event(
+                        events_dir=events_dir,
+                        event_id=int(pending_event_id),
+                        frame=frame_for_event,
+                        idx=int(idx_for_event),
+                        roi=roi,
+                        trigger="auto_window",
+                        auto_metrics=pending_auto_metrics,
+                        burst_records=pending_records,
+                    )
+
+                    session["events"]["counts"]["total"] += 1
+                    session["events"]["counts"]["auto"] += 1
+                    safe_write_json(session_path, session)
+                    print(f"[AUTO] Evento #{pending_event_id} guardado: {ev_dir} | burst={len(pending_records)}")
+
+                    pending_auto_capture = False
+                    pending_event_id = None
+                    pending_auto_metrics = None
+                    pending_trigger_idx = None
+                    pending_trigger_frame = None
+                    pending_records = []
+                    pending_start_t = 0.0
+                    pending_next_capture_t = 0.0
+
+            if idx > 0 and idx % fps_win == 0:
                 session["runtime"]["fps_real_last"] = (round(fps_real, 2) if fps_real is not None else None)
                 session["runtime"]["frames_total"] = idx
                 session["runtime"]["frames_saved"] = saved
@@ -713,6 +875,7 @@ def main() -> None:
 
             if not args.no_display:
                 disp = frame.copy()
+
                 if roi is not None:
                     x, y, rw, rh = roi
                     cv2.rectangle(disp, (x, y), (x + rw, y + rh), (0, 255, 255), 2)
@@ -757,16 +920,29 @@ def main() -> None:
                         )
 
                     if args.auto_use_window_capture:
-                        cv2.putText(
-                            disp,
-                            f"AUTO_WINDOW {args.auto_window_s:.1f}s / {args.auto_interval_s:.2f}s",
-                            (10, 90),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.62,
-                            (255, 200, 0),
-                            2,
-                            cv2.LINE_AA,
-                        )
+                        if pending_auto_capture:
+                            remaining = max(0.0, float(args.auto_window_s) - (time.time() - pending_start_t))
+                            cv2.putText(
+                                disp,
+                                f"AUTO_WINDOW REC {remaining:.1f}s burst={len(pending_records)}",
+                                (10, 90),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.62,
+                                (0, 128, 255),
+                                2,
+                                cv2.LINE_AA,
+                            )
+                        else:
+                            cv2.putText(
+                                disp,
+                                f"AUTO_WINDOW {args.auto_window_s:.1f}s / {args.auto_interval_s:.2f}s",
+                                (10, 90),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.62,
+                                (255, 200, 0),
+                                2,
+                                cv2.LINE_AA,
+                            )
 
                 cv2.imshow("Capture (RealSense)", disp)
                 key = cv2.waitKey(1) & 0xFF
@@ -789,7 +965,6 @@ def main() -> None:
                     burst_records = list(recent_frames)[-burst_n:]
 
                     ev_dir = save_event(
-                        frame_dir=frame_dir,
                         events_dir=events_dir,
                         event_id=event_id,
                         frame=frame,
@@ -822,18 +997,21 @@ def main() -> None:
         if not args.no_display:
             cv2.destroyAllWindows()
 
-        try:
-            session["runtime"]["fps_real_last"] = (round(fps_real, 2) if fps_real is not None else None)
-            session["runtime"]["frames_total"] = idx
-            session["runtime"]["frames_saved"] = saved
-            session["runtime"]["manual_saved"] = manual_saved
-            session["end_time_local"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            session["end_time_epoch"] = time.time()
-            session["status"] = "done"
-            safe_write_json(session_path, session)
-            print("[DONE] Captura finalizada.")
-            print(f"[TRACE] session.json: {session_path}")
-        except Exception:
+        if session and session_path is not None:
+            try:
+                session["runtime"]["fps_real_last"] = (round(fps_real, 2) if fps_real is not None else None)
+                session["runtime"]["frames_total"] = idx
+                session["runtime"]["frames_saved"] = saved
+                session["runtime"]["manual_saved"] = manual_saved
+                session["end_time_local"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                session["end_time_epoch"] = time.time()
+                session["status"] = "done"
+                safe_write_json(session_path, session)
+                print("[DONE] Captura finalizada.")
+                print(f"[TRACE] session.json: {session_path}")
+            except Exception:
+                print("[DONE] Captura finalizada.")
+        else:
             print("[DONE] Captura finalizada.")
 
 

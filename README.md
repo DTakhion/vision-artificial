@@ -409,6 +409,38 @@ python -m app.main \
   --packstructure_excel data/tests_picking/PackStructure.xlsx
 
 # Cierre (desde el orquestador app/main.py)
+
+## etapa 0; captura
+``` bash
+scripts/capture_realsense.py \
+  --width 1280 \
+  --height 720 \
+  --fps 30 \
+  --out_dir data/captures/realsense \
+  --events \
+  --auto_events \
+  --auto_method bg \
+  --auto_use_window_capture \
+  --auto_window_s 10 \
+  --auto_interval_s 1.0 \
+  --roi 140 220 1120 360 \
+  --every 0 \
+  --present_frames 8 \
+  --min_fg_ratio 0.03 \
+  --min_contour_area 4000 \
+  --cooldown_s 20
+```
+
+## etapa 1; Primero generamos el consolidado:
+``` bash
+python -m app.main \
+  --mode_app picking_match \
+  --picking_image data/tests_picking/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2.png \
+  --picking_excel data/tests_excel_picking/SCHNSCL01_Informe_de_Fill_Rate_OUTBOUND_v2.xlsx \
+  --packstructure_excel data/tests_picking/PackStructure.xlsx
+```
+
+# Cierre (desde el orquestador app/main.py)
 ## etapa 1; Primero generamos el consolidado:
 python -m app.main \
   --mode_app picking_match \
