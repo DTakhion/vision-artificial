@@ -1,4 +1,4 @@
-# utils/vision_picking.py
+# utils/vision_picking_table.py
 from __future__ import annotations
 
 import json
@@ -20,60 +20,45 @@ from utils.vision_preprocess import preprocess_variants, PreprocessConfig
 # Config
 # ============================================================
 @dataclass
-class PickingConfig:
-    resize_max_side: int = 1800
+class PickingTableConfig:
+    resize_max_side: int = 2400
 
-    # Fracciones verticales aproximadas del documento
-    header_y0: float = 0.00
-    header_y1: float = 0.46
-
+    # Búsqueda vertical de la tabla
     table_search_y0: float = 0.40
     table_search_y1: float = 0.98
 
-    footer_y0: float = 0.90
-    footer_y1: float = 1.00
+    # Detección de la franja azul del encabezado de tabla
+    blue_header_min_width_ratio: float = 0.50
+    blue_header_min_height_px: int = 8
+    blue_header_max_height_px: int = 90
 
-    # Detección barra azul
-    blue_header_min_width_ratio: float = 0.55
-    blue_header_min_height_px: int = 10
-    blue_header_max_height_px: int = 70
-
-    # Parseo flexible
-    min_code_len: int = 5
+    # OCR / parseo
+    tesseract_psm_table: int = 6
+    min_code_len: int = 4
     max_code_len: int = 24
     min_qty: int = 1
 
-    # OCR
-    tesseract_psm_header: int = 6
-    tesseract_psm_table: int = 6
-    tesseract_psm_footer: int = 6
+    # Filas / celdas
+    row_merge_y_ratio: float = 0.020
+    column_merge_gap_px: int = 18
+
+    # OCR multipass
+    enable_table_multipass: bool = True
+    max_table_passes: int = 6
 
     # Normalización geométrica
     enable_auto_rotate: bool = True
     enable_deskew: bool = True
     deskew_max_angle_deg: float = 8.0
-
-    # Scoring orientación
     orientation_try_angles: Tuple[int, ...] = (0, 90, 180, 270)
 
-    # Tabla / filas
-    row_merge_y_ratio: float = 0.030
-    column_merge_gap_px: int = 18
-
-    # Debug / IO
+    # Salida
     save_json: bool = True
-    output_dir: str = "data/picking"
+    output_dir: str = "data/picking_table"
     save_debug: bool = False
     debug_dir: Optional[str] = None
 
-    # Summary ejecutivo
-    summary_output_dir: str = "data/picking/summary_results"
-    save_summary_json: bool = True
 
-
-# ============================================================
-# Diccionario semántico del encabezado de tabla
-# ============================================================
 HEADER_CONCEPTS: Dict[str, set[str]] = {
     "ruta": {"ruta"},
     "orden": {"orden"},
@@ -83,6 +68,37 @@ HEADER_CONCEPTS: Dict[str, set[str]] = {
     "descripcion": {"descripcion", "descripcian", "descripci6n"},
     "unidades": {"unidades", "unidad"},
     "obs": {"obs", "observacion", "observaciones"},
+}
+
+COMMON_NON_ITEM_TOKENS = {
+    "RUTA",
+    "ORDEN",
+    "KITS",
+    "KITS?",
+    "ARTICULO",
+    "ART",
+    "REF",
+    "DESCRIPCION",
+    "UNIDADES",
+    "OBS",
+    "TOTALES",
+    "TOTAL",
+    "CLIENTE",
+    "DIRECCION",
+    "EXPORTACION",
+    "REGIONES",
+    "CORTE",
+    "TAREAS",
+    "TIPO",
+    "GRUA",
+    "PISO",
+    "TRANSPORTE",
+    "REVISAR",
+    "HORA",
+    "ENTREGA",
+    "WAVE",
+    "MO",
+    "NM",
 }
 
 
@@ -121,22 +137,6 @@ def _clip_bbox(x: int, y: int, w: int, h: int, W: int, H: int) -> Tuple[int, int
 def _crop(img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
     x, y, w, h = bbox
     return img[y:y + h, x:x + w].copy()
-
-
-def _roi_from_ratios(
-    img: np.ndarray,
-    x0r: float,
-    y0r: float,
-    x1r: float,
-    y1r: float,
-) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
-    H, W = img.shape[:2]
-    x0 = int(round(W * x0r))
-    y0 = int(round(H * y0r))
-    x1 = int(round(W * x1r))
-    y1 = int(round(H * y1r))
-    bbox = _clip_bbox(x0, y0, max(0, x1 - x0), max(0, y1 - y0), W, H)
-    return _crop(img, bbox), bbox
 
 
 def _ensure_dir(path: str | Path) -> Path:
@@ -178,6 +178,8 @@ def _normalize_alnum_upper(txt: str) -> str:
     txt = txt.replace(",", "")
     txt = txt.replace("(", "")
     txt = txt.replace(")", "")
+    txt = txt.replace(":", "")
+    txt = txt.replace(";", "")
     return txt
 
 
@@ -212,7 +214,6 @@ def _is_header_like_row(row_text: str) -> bool:
                 break
 
     hits = len(matched_concepts)
-
     if hits >= 3:
         return True
 
@@ -238,48 +239,16 @@ def _rotate_image_90(img: np.ndarray, angle: int) -> np.ndarray:
     return img.copy()
 
 
-def _rotate_bbox_from_rotated_to_original(
-    bbox: Tuple[int, int, int, int],
-    rotated_shape: Tuple[int, int],
-    original_shape: Tuple[int, int],
-    angle: int,
-) -> Tuple[int, int, int, int]:
-    x, y, w, h = bbox
-    Hr, Wr = rotated_shape
-    Ho, Wo = original_shape
-    a = angle % 360
-
-    if a == 0:
-        return bbox
-
-    if a == 90:
-        nx = y
-        ny = Ho - (x + w)
-        return int(nx), int(ny), int(h), int(w)
-
-    if a == 180:
-        nx = Wo - (x + w)
-        ny = Ho - (y + h)
-        return int(nx), int(ny), int(w), int(h)
-
-    if a == 270:
-        nx = Wo - (y + h)
-        ny = x
-        return int(nx), int(ny), int(h), int(w)
-
-    return bbox
-
-
 # ============================================================
 # OCR helpers
 # ============================================================
 def _pick_preprocessed_roi(
     roi_bgr: np.ndarray,
     *,
-    prefer_text: bool = True,
+    prefer_text: bool = False,
 ) -> Tuple[str, np.ndarray]:
     cfg = PreprocessConfig(
-        resize_max_side=1800,
+        resize_max_side=2200,
         clahe=True,
         denoise=False,
         bilateral=True,
@@ -287,14 +256,24 @@ def _pick_preprocessed_roi(
         morph_close=True,
         binarize=True,
         upscale=True,
-        upscale_factors=(2.0,),
+        upscale_factors=(2.0, 3.0),
     )
     ims = preprocess_variants(roi_bgr, cfg=cfg) or {}
 
     if prefer_text:
-        order = ["bw_x2", "bw", "sharp_x2", "sharp", "gray", "bilateral_sharp", "bilateral"]
+        order = [
+            "bw_x3", "bw_x2", "bw",
+            "sharp_x3", "sharp_x2", "sharp",
+            "gray_x3", "gray_x2", "gray",
+            "bilateral_sharp_x2", "bilateral_sharp", "bilateral"
+        ]
     else:
-        order = ["gray", "sharp_x2", "sharp", "bilateral_sharp", "bw_x2"]
+        order = [
+            "gray_x3", "gray_x2", "gray",
+            "sharp_x3", "sharp_x2", "sharp",
+            "bw_x3", "bw_x2", "bw",
+            "bilateral_sharp_x2", "bilateral_sharp", "bilateral"
+        ]
 
     for k in order:
         if k in ims and ims[k] is not None:
@@ -302,6 +281,79 @@ def _pick_preprocessed_roi(
 
     gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
     return "gray_fallback", gray
+
+
+def _build_manual_variants(roi_bgr: np.ndarray) -> Dict[str, np.ndarray]:
+    gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+    variants: Dict[str, np.ndarray] = {"gray_manual": gray}
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    variants["clahe_manual"] = clahe
+
+    sharp = cv2.GaussianBlur(clahe, (0, 0), 1.2)
+    sharp = cv2.addWeighted(clahe, 1.7, sharp, -0.7, 0)
+    variants["sharp_manual"] = sharp
+
+    otsu = cv2.threshold(sharp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    variants["otsu_manual"] = otsu
+
+    adapt = cv2.adaptiveThreshold(
+        sharp,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        12,
+    )
+    variants["adaptive_manual"] = adapt
+
+    for name in list(variants.keys()):
+        img = variants[name]
+        h, w = img.shape[:2]
+        up2 = cv2.resize(img, (max(1, int(w * 2.0)), max(1, int(h * 2.0))), interpolation=cv2.INTER_CUBIC)
+        variants[f"{name}_x2"] = up2
+
+    return variants
+
+
+def _rescale_ocr_boxes(
+    items: List[Dict[str, Any]],
+    *,
+    src_shape: Tuple[int, int],
+    dst_shape: Tuple[int, int],
+) -> List[Dict[str, Any]]:
+    src_h, src_w = src_shape[:2]
+    dst_h, dst_w = dst_shape[:2]
+
+    if src_h <= 0 or src_w <= 0 or dst_h <= 0 or dst_w <= 0:
+        return items
+
+    sx = dst_w / float(src_w)
+    sy = dst_h / float(src_h)
+
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        bbox = it.get("bbox")
+        if not bbox:
+            out.append(it)
+            continue
+
+        x, y, w, h = bbox
+        nx = int(round(x * sx))
+        ny = int(round(y * sy))
+        nw = int(round(w * sx))
+        nh = int(round(h * sy))
+
+        nx = max(0, min(dst_w - 1, nx)) if dst_w > 0 else 0
+        ny = max(0, min(dst_h - 1, ny)) if dst_h > 0 else 0
+        nw = max(1, min(dst_w - nx, nw))
+        nh = max(1, min(dst_h - ny, nh))
+
+        new_it = dict(it)
+        new_it["bbox"] = (nx, ny, nw, nh)
+        out.append(new_it)
+
+    return out
 
 
 def _ocr_text(
@@ -468,6 +520,68 @@ def _ocr_words_from_data(
     return out
 
 
+def _ocr_table_candidates(
+    table_roi: np.ndarray,
+    cfg: PickingTableConfig,
+) -> List[Dict[str, Any]]:
+    whitelist = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:()&? '
+
+    roi_h, roi_w = table_roi.shape[:2]
+    candidates: List[Dict[str, Any]] = []
+
+    main_variant_name, main_gray = _pick_preprocessed_roi(table_roi, prefer_text=False)
+
+    main_words = _ocr_words_from_data(main_gray, psm=cfg.tesseract_psm_table, whitelist=whitelist)
+    main_lines = _ocr_lines_from_data(main_gray, psm=cfg.tesseract_psm_table, whitelist=whitelist)
+
+    main_words = _rescale_ocr_boxes(main_words, src_shape=main_gray.shape[:2], dst_shape=(roi_h, roi_w))
+    main_lines = _rescale_ocr_boxes(main_lines, src_shape=main_gray.shape[:2], dst_shape=(roi_h, roi_w))
+
+    candidates.append(
+        {
+            "name": main_variant_name,
+            "gray": main_gray,
+            "words": main_words,
+            "lines": main_lines,
+        }
+    )
+
+    if cfg.enable_table_multipass:
+        manual = _build_manual_variants(table_roi)
+        preferred = [
+            "gray_manual_x2",
+            "sharp_manual_x2",
+            "adaptive_manual_x2",
+            "otsu_manual_x2",
+            "clahe_manual_x2",
+        ]
+        count = 0
+        for name in preferred:
+            if name not in manual:
+                continue
+
+            gray = manual[name]
+            words = _ocr_words_from_data(gray, psm=cfg.tesseract_psm_table, whitelist=whitelist)
+            lines = _ocr_lines_from_data(gray, psm=cfg.tesseract_psm_table, whitelist=whitelist)
+
+            words = _rescale_ocr_boxes(words, src_shape=gray.shape[:2], dst_shape=(roi_h, roi_w))
+            lines = _rescale_ocr_boxes(lines, src_shape=gray.shape[:2], dst_shape=(roi_h, roi_w))
+
+            candidates.append(
+                {
+                    "name": name,
+                    "gray": gray,
+                    "words": words,
+                    "lines": lines,
+                }
+            )
+            count += 1
+            if count >= max(0, cfg.max_table_passes - 1):
+                break
+
+    return candidates
+
+
 # ============================================================
 # Normalización geométrica
 # ============================================================
@@ -477,7 +591,6 @@ def _estimate_skew_angle(gray: np.ndarray, max_angle_deg: float = 8.0) -> float:
         return 0.0
 
     bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
-
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 3))
     bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, kernel, iterations=1)
 
@@ -532,7 +645,7 @@ def _rotate_arbitrary(img: np.ndarray, angle_deg: float) -> np.ndarray:
     )
 
 
-def _deskew_if_needed(img_bgr: np.ndarray, cfg: PickingConfig) -> Tuple[np.ndarray, float]:
+def _deskew_if_needed(img_bgr: np.ndarray, cfg: PickingTableConfig) -> Tuple[np.ndarray, float]:
     if not cfg.enable_deskew:
         return img_bgr, 0.0
 
@@ -547,11 +660,11 @@ def _deskew_if_needed(img_bgr: np.ndarray, cfg: PickingConfig) -> Tuple[np.ndarr
 
 
 # ============================================================
-# Detección de tabla con OpenCV
+# Detección de tabla
 # ============================================================
 def _find_blue_header_bbox(
     img_bgr: np.ndarray,
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
 ) -> Optional[Tuple[int, int, int, int]]:
     H, W = img_bgr.shape[:2]
     y0 = int(round(H * cfg.table_search_y0))
@@ -562,7 +675,7 @@ def _find_blue_header_bbox(
 
     hsv = cv2.cvtColor(search, cv2.COLOR_BGR2HSV)
 
-    lower_blue = np.array([90, 50, 40], dtype=np.uint8)
+    lower_blue = np.array([85, 35, 30], dtype=np.uint8)
     upper_blue = np.array([140, 255, 255], dtype=np.uint8)
     mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
@@ -583,9 +696,9 @@ def _find_blue_header_bbox(
             continue
 
         area = w * h
-        width_score = w * 6.0
-        y_score = -abs((y + y0) - int(H * 0.63)) * 0.6
-        height_score = -abs(h - 32) * 12.0
+        width_score = w * 8.0
+        y_score = -abs((y + y0) - int(H * 0.62)) * 0.7
+        height_score = -abs(h - 28) * 8.0
         score = area + width_score + y_score + height_score
 
         candidates.append((score, (x, y + y0, w, h)))
@@ -599,7 +712,7 @@ def _find_blue_header_bbox(
 
 def _detect_table_bbox(
     img_bgr: np.ndarray,
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
 ) -> Optional[Tuple[int, int, int, int]]:
     H, W = img_bgr.shape[:2]
 
@@ -609,9 +722,10 @@ def _detect_table_bbox(
 
     bx, by, bw, bh = blue_bbox
 
-    x0 = max(0, bx - int(0.004 * W))
-    x1 = min(W, bx + bw + int(0.004 * W))
-    y0 = min(H - 1, by + bh + int(0.015 * H))
+    x0 = max(0, bx - int(0.006 * W))
+    x1 = min(W, bx + bw + int(0.006 * W))
+
+    y0 = max(0, by + int(0.85 * bh))
     y1 = min(H, int(H * 0.965))
 
     return _clip_bbox(x0, y0, x1 - x0, y1 - y0, W, H)
@@ -619,7 +733,7 @@ def _detect_table_bbox(
 
 def _fallback_table_bbox(
     img_bgr: np.ndarray,
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
 ) -> Tuple[int, int, int, int]:
     H, W = img_bgr.shape[:2]
     y0 = int(round(H * cfg.table_search_y0))
@@ -627,114 +741,64 @@ def _fallback_table_bbox(
     return _clip_bbox(0, y0, W, max(1, y1 - y0), W, H)
 
 
-# ============================================================
-# Parseo de metadata
-# ============================================================
-def _search_first(patterns: List[str], txt: str, flags: int = re.IGNORECASE) -> Optional[str]:
-    for pat in patterns:
-        m = re.search(pat, txt, flags)
-        if m:
-            val = m.group(1).strip()
-            if val:
-                return val
-    return None
+def _table_presence_score(img_bgr: np.ndarray, cfg: PickingTableConfig) -> Tuple[float, Dict[str, Any]]:
+    H, W = img_bgr.shape[:2]
+    blue_bbox = _find_blue_header_bbox(img_bgr, cfg)
 
+    blue_score = 0.0
+    if blue_bbox is not None:
+        bx, by, bw, bh = blue_bbox
+        blue_score += 4.0
+        blue_score += min(4.0, bw / max(1.0, W * 0.70))
+        blue_center_y = by + bh / 2.0
+        ideal_y = H * 0.64
+        blue_score += max(0.0, 2.0 - abs(blue_center_y - ideal_y) / max(1.0, H * 0.18))
 
-def _parse_header_fields(txt: str) -> Dict[str, Optional[str]]:
-    txt = _clean_text(txt)
+    landscape_score = 1.0 if W >= H else -1.5
+    total = blue_score + landscape_score
 
-    return {
-        "centro": _search_first(
-            [
-                r"\b(SCHNSCL0?1)\b",
-                r"Reporte de Desconsolidaci[oó]n\s+([A-Z0-9_-]+)",
-                r"\bCentro[: ]+([A-Z0-9_-]+)",
-            ],
-            txt,
-        ),
-        "nm": _search_first(
-            [
-                r"\bN\s*MO\s*[: ]+\s*([0-9]+)",
-                r"\bNM[°ºo]?\s*[: ]+\s*([0-9]+)",
-                r"\bN[°ºo]?\s*MO\s*[: ]+\s*([0-9]+)",
-            ],
-            txt,
-        ),
-        "entrega": _search_first(
-            [
-                r"\bEntrega\s*N?\s*[: ]+\s*([0-9A-Z_-]+)",
-            ],
-            txt,
-        ),
-        "wave_id": _search_first(
-            [
-                r"\bWave\s*N?\s*[: ]+\s*([0-9A-Z_-]+)",
-                r"\bWave(?:\s*ID)?\s*[: ]+\s*([0-9A-Z_-]+)",
-            ],
-            txt,
-        ),
-        "ruta": _search_first(
-            [
-                r"\bRuta\s*[: ]+\s*([A-Z0-9_-]+)",
-            ],
-            txt,
-        ),
-        "cliente": _search_first(
-            [
-                r"\bCliente\s*[: ]+\s*(.+?)(?=\bDirecci[oó]n\b|$)",
-            ],
-            txt,
-        ),
-        "direccion": _search_first(
-            [
-                r"\bDirecci[oó]n\s*[: ]+\s*(.+?)(?=\bTipo\b|\bGrua\b|\bPiso\b|$)",
-            ],
-            txt,
-        ),
-        "fecha_impresion": _search_first(
-            [
-                r"\bFecha\s*Impresi[oó]n\s*[: ]+\s*([0-9]{2}-[0-9]{2}-[0-9]{2,4})",
-                r"\bFecha\s*Impresi[oó]n\s*[: ]+\s*([0-9]{2}/[0-9]{2}/[0-9]{2,4})",
-                r"\bFecha\s*[: ]+\s*([0-9]{2}-[0-9]{2}-[0-9]{2,4})",
-            ],
-            txt,
-        ),
-        "hora_impresion": _search_first(
-            [
-                r"\bHora\s*Impresi[oó]n\s*[: ]+\s*([0-9]{2}:[0-9]{2}:[0-9]{2}(?:\s*GMT[+-][0-9:]+)?)",
-                r"\bHora\s*[: ]+\s*([0-9]{2}:[0-9]{2}:[0-9]{2})",
-                r"\bHora\s*[: ]+\s*([0-9]{2}:[0-9]{2})",
-            ],
-            txt,
-        ),
+    return total, {
+        "score_total": total,
+        "score_blue": blue_score,
+        "score_landscape": landscape_score,
+        "blue_bbox": blue_bbox,
     }
 
 
-def _metadata_score(md: Dict[str, Optional[str]]) -> float:
-    score = 0.0
-    if md.get("centro"):
-        score += 2.0
-    if md.get("nm"):
-        score += 2.5
-    if md.get("entrega"):
-        score += 2.5
-    if md.get("wave_id"):
-        score += 2.5
-    if md.get("ruta"):
-        score += 2.5
-    if md.get("cliente"):
-        score += 1.0
-    if md.get("direccion"):
-        score += 1.0
-    if md.get("fecha_impresion"):
-        score += 1.0
-    if md.get("hora_impresion"):
-        score += 1.0
-    return score
+def _auto_orient_image(
+    img_bgr: np.ndarray,
+    cfg: PickingTableConfig,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    if not cfg.enable_auto_rotate:
+        return img_bgr, {"selected_angle": 0, "candidates": []}
+
+    candidates = []
+    best_score = -1e18
+    best_img = img_bgr
+    best_angle = 0
+    best_details: Dict[str, Any] = {}
+
+    for angle in cfg.orientation_try_angles:
+        cand = _rotate_image_90(img_bgr, angle)
+        score, details = _table_presence_score(cand, cfg)
+        candidates.append({"angle": angle, "score": score, **details})
+
+        if score > best_score:
+            best_score = score
+            best_img = cand
+            best_angle = angle
+            best_details = details
+
+    return best_img, {
+        "selected_angle": best_angle,
+        "best_score": best_score,
+        "best_details": best_details,
+        "candidates": candidates,
+    }
 
 
 # ============================================================
-# Parseo de productos flexible
+# Parseo de productos
 # ============================================================
 def _looks_like_route(token: str) -> bool:
     s = _normalize_alnum_upper(token)
@@ -746,35 +810,35 @@ def _looks_like_order(token: str) -> bool:
     return bool(re.fullmatch(r"\d{8,12}", s))
 
 
-def _looks_like_item_code(token: str, cfg: PickingConfig) -> bool:
+def _looks_like_item_code(token: str, cfg: PickingTableConfig) -> bool:
     s = _normalize_alnum_upper(token)
     if len(s) < cfg.min_code_len or len(s) > cfg.max_code_len:
-        return False
-    if s.isdigit():
         return False
     if _looks_like_route(s):
         return False
     if _looks_like_order(s):
         return False
+    if s in COMMON_NON_ITEM_TOKENS:
+        return False
     if not re.fullmatch(r"[A-Z0-9_-]+", s):
         return False
 
-    # Debe tener mezcla razonable de letras y números
-    if not re.search(r"[A-Z]", s):
-        return False
-    if not re.search(r"\d", s):
+    has_letters = bool(re.search(r"[A-Z]", s))
+    has_digits = bool(re.search(r"\d", s))
+
+    # Palabras OCR basura puramente alfabéticas
+    if re.fullmatch(r"[A-Z]{1,3}", s):
         return False
 
-    # Patrones frecuentes del proyecto / documentos observados
-    common_patterns = [
-        r"^C\d{2}F3TM\d{3}$",   # ej: C10F3TM050 / C16F3TM125 / C25F3TM200
-        r"^EZ9F\d{5}$",         # ej: EZ9F56350
-    ]
-    if any(re.fullmatch(pat, s) for pat in common_patterns):
+    # Casos típicos alfanuméricos
+    if has_letters and has_digits:
         return True
 
-    # Fallback genérico: alfanumérico mixto relativamente compacto
-    return True
+    # Casos puramente alfabéticos razonables como EZAROTE
+    if re.fullmatch(r"[A-Z]{5,16}", s):
+        return True
+
+    return False
 
 
 def _fix_route_ocr(txt: str) -> str:
@@ -794,54 +858,21 @@ def _fix_item_code_ocr(txt: str) -> str:
     s = s.strip("_-")
     s = re.sub(r"_{2,}", "_", s)
 
-    # Correcciones OCR globales conservadoras
-    s = s.replace("O", "0")
-    s = s.replace("I", "1")
-    s = s.replace("L", "1")
-
-    # Casos ya observados
-    s = s.replace("EZO", "EZ0")
-    s = s.replace("TMO", "TM0")
-    s = s.replace("CAO", "CA0")
-    s = s.replace("OFS", "0FS")
-
-    s = re.sub(r"0S0$", "050", s)
-
-    s = s.replace("TM00S0", "TM050")
-    s = s.replace("TMO0S0", "TM050")
-    s = s.replace("TM0OS0", "TM050")
-
-    s = re.sub(r"TM0+50$", "TM050", s)
-    s = re.sub(r"TMO0S0$", "TM050", s)
-    s = re.sub(r"TM00S0$", "TM050", s)
-
-    # =========================================================
-    # Reparaciones quirúrgicas para familia CxxF3TMxxx
-    # OCR típico: T -> 1  => C10F31M050
-    # OCR típico: TM -> 1M / IM / LM
-    # =========================================================
-
-    # C10F31M050 -> C10F3TM050
-    s = re.sub(r"^(C\d{2}F3)1M(\d{3})$", r"\1TM\2", s)
-
-    # C10F3IM050 / C10F3LM050 -> C10F3TM050
-    s = re.sub(r"^(C\d{2}F3)[1IL]M(\d{3})$", r"\1TM\2", s)
-
-    # C10F31MO50 -> C10F3TM050
-    s = re.sub(r"^(C\d{2}F3)1M0?([0-9]{2,3})$", r"\1TM\2", s)
-
-    # Si el bloque final quedó corto por OCR, rellenamos solo casos muy típicos
-    s = re.sub(r"^(C\d{2}F3TM)(50)$", r"\1050", s)
-
-    # Normalización de Easy9 observada
     s = re.sub(r"^E29F", "EZ9F", s)
     s = re.sub(r"^EZGF", "EZ9F", s)
     s = re.sub(r"^EZ9FS", "EZ9F5", s)
 
+    s = s.replace("TMO", "TM0")
+    s = s.replace("CAO", "CA0")
+
+    s = re.sub(r"^(C\d{2}F3)1M(\d{3})$", r"\1TM\2", s)
+    s = re.sub(r"^(C\d{2}F3)[1IL]M(\d{3})$", r"\1TM\2", s)
+
+    s = re.sub(r"[^A-Z0-9_-]", "", s)
     return s
 
 
-def _extract_qty_from_text(txt: str, cfg: PickingConfig) -> Optional[int]:
+def _extract_qty_from_text(txt: str, cfg: PickingTableConfig) -> Optional[int]:
     nums = re.findall(r"\b\d+\b", txt or "")
     if not nums:
         return None
@@ -882,7 +913,7 @@ def _filter_table_noise(words: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         low = txt.lower()
         if low in {
             "ruta", "orden", "kits?", "kits", "articulo", "art", "ref",
-            "descripcion", "unidades", "obs", "totales"
+            "descripcion", "unidades", "obs", "totales", "total"
         }:
             continue
 
@@ -897,7 +928,7 @@ def _row_clusters_from_words(
     words: List[Dict[str, Any]],
     *,
     table_h: int,
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
 ) -> List[List[Dict[str, Any]]]:
     filtered = _filter_table_noise(words)
     if not filtered:
@@ -982,28 +1013,16 @@ def _merge_words_horizontally(
 
 def _cluster_to_cells(
     cluster: List[Dict[str, Any]],
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
 ) -> List[Dict[str, Any]]:
     merged = _merge_words_horizontally(cluster, max_gap_px=cfg.column_merge_gap_px)
     merged.sort(key=lambda x: x["bbox"][0])
     return merged
 
 
-def _compact_cluster_text(cluster: List[Dict[str, Any]]) -> str:
-    parts = []
-    for ln in cluster:
-        txt = _clean_text(ln.get("text") or "")
-        bbox = ln.get("bbox")
-        if not txt or not bbox:
-            continue
-        parts.append((bbox[0], txt))
-    parts.sort(key=lambda t: t[0])
-    return _clean_text(" ".join(t[1] for t in parts))
-
-
 def _parse_row_from_cells(
     cells: List[Dict[str, Any]],
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
 ) -> Optional[Dict[str, Any]]:
     if not cells:
         return None
@@ -1012,18 +1031,17 @@ def _parse_row_from_cells(
     if not texts:
         return None
 
-    row_text = _clean_text(" ".join(texts))
+    row_text = _clean_text(" ".join(texts)).strip()
     low = row_text.lower()
 
     if "totales" in low:
         return None
-
     if _is_header_like_row(row_text):
         return None
 
     qty = None
     qty_idx = None
-    for i in range(len(cells) - 1, -1, -1):
+    for i in range(len(cells) - 1, max(-1, len(cells) - 4), -1):
         q = _extract_qty_from_text(cells[i]["text"], cfg)
         if q is not None:
             qty = q
@@ -1034,7 +1052,7 @@ def _parse_row_from_cells(
         return None
 
     before = cells[:qty_idx]
-    if not before:
+    if len(before) < 2:
         return None
 
     ruta = None
@@ -1046,12 +1064,6 @@ def _parse_row_from_cells(
             ruta_idx = i
             break
 
-    if ruta is None and before:
-        cand = _fix_route_ocr(before[0]["text"])
-        if _looks_like_route(cand):
-            ruta = cand
-            ruta_idx = 0
-
     orden = None
     orden_idx = None
     start_for_order = (ruta_idx + 1) if ruta_idx is not None else 0
@@ -1061,14 +1073,6 @@ def _parse_row_from_cells(
             orden = tok
             orden_idx = i
             break
-
-    if orden is None:
-        for i, c in enumerate(before):
-            tok = _normalize_alnum_upper(c["text"])
-            if _looks_like_order(tok):
-                orden = tok
-                orden_idx = i
-                break
 
     codigo_item = None
     codigo_idx = None
@@ -1098,21 +1102,20 @@ def _parse_row_from_cells(
         desc_cells.append(_clean_text(c["text"]))
 
     descripcion = _clean_text(" ".join([x for x in desc_cells if x])) or None
+    if not descripcion or len(descripcion) < 5:
+        return None
 
-    desc_norm = _normalize_alnum_upper(descripcion or "")
-    desc_ok = len(desc_norm) >= 5
-    has_route_or_order = bool(ruta or orden)
-
-    if not (has_route_or_order or desc_ok):
+    desc_tokens = [t for t in descripcion.split() if t]
+    if len(desc_tokens) < 1:
         return None
 
     row_bbox = _cluster_bbox(cells)
     avg_conf = _cluster_confidence(cells)
 
     return {
-        "field_1": ruta,
-        "field_2": orden,
-        "codigo_item": codigo_item,
+        "ruta": ruta,
+        "orden": orden,
+        "articulo": codigo_item,
         "descripcion": descripcion,
         "unidades": qty,
         "raw_line": row_text,
@@ -1131,7 +1134,7 @@ def _parse_row_from_cells(
 
 def _parse_products_from_words(
     words: List[Dict[str, Any]],
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
     table_bbox: Tuple[int, int, int, int],
 ) -> List[Dict[str, Any]]:
     _, _, _, th = table_bbox
@@ -1146,7 +1149,7 @@ def _parse_products_from_words(
         if row is None:
             continue
 
-        key = (row["codigo_item"], int(row["unidades"]))
+        key = (row["articulo"], int(row["unidades"]))
         if key in seen:
             continue
         seen.add(key)
@@ -1155,86 +1158,89 @@ def _parse_products_from_words(
     return items
 
 
-# ============================================================
-# Auto orientación
-# ============================================================
-def _orientation_score(
-    img_bgr: np.ndarray,
-    cfg: PickingConfig,
-) -> Tuple[float, Dict[str, Any]]:
-    H, W = img_bgr.shape[:2]
+def _score_products(products: List[Dict[str, Any]]) -> float:
+    score = 0.0
+    score += len(products) * 8.0
 
-    header_roi, header_bbox = _roi_from_ratios(img_bgr, 0.0, cfg.header_y0, 1.0, cfg.header_y1)
-    header_variant, header_gray = _pick_preprocessed_roi(header_roi, prefer_text=True)
-    header_text = _ocr_text(
-        header_gray,
-        psm=cfg.tesseract_psm_header,
-        whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:() ",
-    )
-    metadata = _parse_header_fields(header_text)
-    md_score = _metadata_score(metadata)
+    unique_codes = {p.get("articulo") for p in products if p.get("articulo")}
+    score += len(unique_codes) * 2.0
 
-    blue_bbox = _find_blue_header_bbox(img_bgr, cfg)
-    blue_score = 0.0
-    if blue_bbox is not None:
-        bx, by, bw, bh = blue_bbox
-        blue_score += 4.0
-        blue_score += min(4.0, bw / max(1.0, W * 0.70))
-        blue_center_y = by + bh / 2.0
-        ideal_y = H * 0.64
-        blue_score += max(0.0, 2.0 - abs(blue_center_y - ideal_y) / max(1.0, H * 0.18))
+    for p in products:
+        code = p.get("articulo") or ""
+        desc = p.get("descripcion") or ""
+        units = p.get("unidades")
+        if code and len(code) >= 4:
+            score += 2.0
+        if desc and len(desc) >= 5:
+            score += 1.0
+        if isinstance(units, int) and units > 0:
+            score += 1.0
+        if p.get("ruta"):
+            score += 0.5
+        if p.get("orden"):
+            score += 0.5
 
-    landscape_score = 1.0 if W >= H else -1.5
-
-    total = md_score + blue_score + landscape_score
-
-    details = {
-        "score_total": total,
-        "score_metadata": md_score,
-        "score_blue": blue_score,
-        "score_landscape": landscape_score,
-        "metadata": metadata,
-        "header_text": header_text,
-        "header_bbox": header_bbox,
-        "header_variant": header_variant,
-        "blue_bbox": blue_bbox,
-    }
-    return total, details
+    return score
 
 
-def _auto_orient_image(
-    img_bgr: np.ndarray,
-    cfg: PickingConfig,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
-    if not cfg.enable_auto_rotate:
-        return img_bgr, {"selected_angle": 0, "candidates": []}
+def _select_best_products_result(
+    candidates: List[Dict[str, Any]],
+    cfg: PickingTableConfig,
+    table_bbox: Tuple[int, int, int, int],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    evaluated: List[Dict[str, Any]] = []
 
-    candidates = []
-    best_score = -1e18
-    best_img = img_bgr
-    best_angle = 0
-    best_details: Dict[str, Any] = {}
+    for cand in candidates:
+        words = cand.get("words") or []
+        lines = cand.get("lines") or []
 
-    for angle in cfg.orientation_try_angles:
-        cand = _rotate_image_90(img_bgr, angle)
-        score, details = _orientation_score(cand, cfg)
-        candidates.append({
-            "angle": angle,
-            "score": score,
-            **details,
-        })
+        products_words = _parse_products_from_words(words, cfg, table_bbox) if words else []
+        products_lines = _parse_products_from_words(lines, cfg, table_bbox) if lines else []
 
-        if score > best_score:
-            best_score = score
-            best_img = cand
-            best_angle = angle
-            best_details = details
+        score_words = _score_products(products_words)
+        score_lines = _score_products(products_lines)
 
-    return best_img, {
-        "selected_angle": best_angle,
-        "best_score": best_score,
-        "best_details": best_details,
-        "candidates": candidates,
+        if score_lines > score_words:
+            best_products = products_lines
+            mode = "lines"
+            best_score = score_lines
+        else:
+            best_products = products_words
+            mode = "words"
+            best_score = score_words
+
+        evaluated.append(
+            {
+                "variant": cand.get("name"),
+                "mode": mode,
+                "score": best_score,
+                "products_count": len(best_products),
+                "products": best_products,
+            }
+        )
+
+    if not evaluated:
+        return [], {"selected": None, "candidates": []}
+
+    evaluated.sort(key=lambda x: x["score"], reverse=True)
+    best = evaluated[0]
+
+    return best["products"], {
+        "selected": {
+            "variant": best["variant"],
+            "mode": best["mode"],
+            "score": best["score"],
+            "products_count": best["products_count"],
+        },
+        "candidates": [
+            {
+                "variant": e["variant"],
+                "mode": e["mode"],
+                "score": e["score"],
+                "products_count": e["products_count"],
+            }
+            for e in evaluated
+        ],
     }
 
 
@@ -1244,7 +1250,7 @@ def _auto_orient_image(
 def _save_result_json(
     result: Dict[str, Any],
     *,
-    cfg: PickingConfig,
+    cfg: PickingTableConfig,
     source_name: Optional[str] = None,
 ) -> str:
     out_dir = _ensure_dir(cfg.output_dir)
@@ -1254,70 +1260,40 @@ def _save_result_json(
     if source_name:
         safe_source = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(source_name).stem).strip("_")
         if not safe_source:
-            safe_source = "picking"
+            safe_source = "picking_table"
 
-    if safe_source:
-        filename = f"{safe_source}_{ts}.json"
-    else:
-        filename = f"picking_{ts}.json"
-
+    filename = f"{safe_source}_{ts}.json" if safe_source else f"picking_table_{ts}.json"
     out_path = out_dir / filename
+
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     return str(out_path)
 
 
-def _safe_int(x: Any) -> Optional[int]:
-    try:
-        if x is None or x == "":
-            return None
-        return int(x)
-    except Exception:
-        return None
-
-
-def build_picking_summary(result: Dict[str, Any]) -> Dict[str, Any]:
-    metadata = result.get("metadata") or {}
+def build_table_summary(result: Dict[str, Any]) -> Dict[str, Any]:
     products = result.get("products") or []
-
-    summary_products: List[Dict[str, Any]] = []
     total_units = 0
 
+    summary_products: List[Dict[str, Any]] = []
     for p in products:
-        unidades = _safe_int(p.get("unidades")) or 0
-        total_units += unidades
-
+        units = p.get("unidades") if isinstance(p.get("unidades"), int) else 0
+        total_units += units
         summary_products.append(
             {
-                "ruta": p.get("field_1"),
-                "orden": p.get("field_2"),
-                "articulo": p.get("codigo_item"),
+                "ruta": p.get("ruta"),
+                "orden": p.get("orden"),
+                "articulo": p.get("articulo"),
                 "descripcion": p.get("descripcion"),
-                "unidades": unidades,
+                "unidades": units,
             }
         )
 
-    summary: Dict[str, Any] = {
-        "document_type": "picking_sheet",
+    return {
+        "document_type": "picking_sheet_table_only",
         "status": result.get("status"),
         "source_name": result.get("source_name"),
         "timestamp": result.get("timestamp"),
-        "identifiers": {
-            "centro": metadata.get("centro"),
-            "mo": metadata.get("nm"),
-            "entrega": metadata.get("entrega"),
-            "wave": metadata.get("wave_id"),
-            "ruta": metadata.get("ruta"),
-        },
-        "document_info": {
-            "fecha_impresion": metadata.get("fecha_impresion"),
-            "hora_impresion": metadata.get("hora_impresion"),
-        },
-        "client": {
-            "nombre": metadata.get("cliente"),
-            "direccion": metadata.get("direccion"),
-        },
         "products": summary_products,
         "totals": {
             "lineas": len(summary_products),
@@ -1325,47 +1301,18 @@ def build_picking_summary(result: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
 
-    return summary
-
-
-def _save_summary_json(
-    summary: Dict[str, Any],
-    *,
-    cfg: PickingConfig,
-    source_name: Optional[str] = None,
-) -> str:
-    out_dir = _ensure_dir(cfg.summary_output_dir)
-    ts = _timestamp_now()
-
-    safe_source = None
-    if source_name:
-        safe_source = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(source_name).stem).strip("_")
-        if not safe_source:
-            safe_source = "picking_summary"
-
-    if safe_source:
-        filename = f"{safe_source}_summary_{ts}.json"
-    else:
-        filename = f"picking_summary_{ts}.json"
-
-    out_path = out_dir / filename
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2)
-
-    return str(out_path)
-
 
 # ============================================================
 # API principal
 # ============================================================
-def extract_picking_sheet(
+def extract_picking_table(
     img_bgr: np.ndarray,
     *,
-    cfg: Optional[PickingConfig] = None,
+    cfg: Optional[PickingTableConfig] = None,
     source_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     t0 = time.perf_counter()
-    cfg = cfg or PickingConfig()
+    cfg = cfg or PickingTableConfig()
 
     _configure_tesseract_from_env()
 
@@ -1387,62 +1334,22 @@ def extract_picking_sheet(
 
     oriented_img, orientation_info = _auto_orient_image(img0, cfg)
     final_img, deskew_angle = _deskew_if_needed(oriented_img, cfg)
-
     img = final_img
-    H, W = img.shape[:2]
 
-    header_roi, header_bbox = _roi_from_ratios(img, 0.0, cfg.header_y0, 1.0, cfg.header_y1)
+    H, W = img.shape[:2]
 
     table_bbox = _detect_table_bbox(img, cfg)
     if table_bbox is None:
         table_bbox = _fallback_table_bbox(img, cfg)
     table_roi = _crop(img, table_bbox)
 
-    tx, ty, tw, th = table_bbox
-    footer_y = min(H - 1, ty + th + int(0.01 * H))
-    footer_h = max(1, H - footer_y)
-    footer_bbox = _clip_bbox(0, footer_y, W, footer_h, W, H)
-    footer_roi = _crop(img, footer_bbox)
+    table_candidates = _ocr_table_candidates(table_roi, cfg)
+    products, table_eval = _select_best_products_result(table_candidates, cfg, table_bbox)
 
-    header_variant, header_gray = _pick_preprocessed_roi(header_roi, prefer_text=True)
-    header_text = _ocr_text(
-        header_gray,
-        psm=cfg.tesseract_psm_header,
-        whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:() ",
-    )
-    metadata = _parse_header_fields(header_text)
-
-    table_variant, table_gray = _pick_preprocessed_roi(table_roi, prefer_text=False)
-    table_words = _ocr_words_from_data(
-        table_gray,
-        psm=cfg.tesseract_psm_table,
-        whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:() ",
-    )
-    table_lines = _ocr_lines_from_data(
-        table_gray,
-        psm=cfg.tesseract_psm_table,
-        whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:() ",
-    )
-
-    products = _parse_products_from_words(table_words, cfg, table_bbox)
-
-    if not products and table_lines:
-        products = _parse_products_from_words(table_lines, cfg, table_bbox)
-
-    table_text_block = ""
-    if not products:
-        table_text_block = _ocr_text(
-            table_gray,
-            psm=cfg.tesseract_psm_table,
-            whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:() ",
-        )
-
-    footer_variant, footer_gray = _pick_preprocessed_roi(footer_roi, prefer_text=True)
-    footer_text = _ocr_text(
-        footer_gray,
-        psm=cfg.tesseract_psm_footer,
-        whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:() ",
-    )
+    table_variant = table_candidates[0]["name"] if table_candidates else None
+    table_gray = table_candidates[0]["gray"] if table_candidates else cv2.cvtColor(table_roi, cv2.COLOR_BGR2GRAY)
+    table_words = table_candidates[0]["words"] if table_candidates else []
+    table_lines = table_candidates[0]["lines"] if table_candidates else []
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -1452,58 +1359,49 @@ def extract_picking_sheet(
         "source_name": source_name,
         "timestamp": datetime.now().isoformat(),
         "image_size": {"w": W, "h": H},
-        "metadata": metadata,
         "products": products,
         "counts": {
             "products_detected": len(products),
         },
         "rois": {
-            "header": {"bbox": header_bbox, "variant": header_variant},
             "table": {"bbox": table_bbox, "variant": table_variant},
-            "footer": {"bbox": footer_bbox, "variant": footer_variant},
         },
         "normalization": {
             "selected_rotation_deg": orientation_info.get("selected_angle"),
             "deskew_angle_deg": deskew_angle,
         },
         "raw": {
-            "header_text": header_text,
-            "footer_text": footer_text,
             "table_words": table_words,
             "table_lines": table_lines,
-            "table_text_block": table_text_block,
+            "table_text_block": _ocr_text(
+                table_gray,
+                psm=cfg.tesseract_psm_table,
+                whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_/.:() ",
+            ),
+            "table_eval": table_eval,
             "orientation_candidates": orientation_info.get("candidates", []),
         },
         "config": asdict(cfg),
-        "saved_json_path": None,
         "summary": None,
-        "saved_summary_json_path": None,
+        "saved_json_path": None,
     }
 
     if cfg.save_debug:
         debug_dir = cfg.debug_dir or os.path.join(cfg.output_dir, f"debug_{_timestamp_now()}")
         dbg = _ensure_dir(debug_dir)
+
         cv2.imwrite(str(dbg / "00_input_normalized.png"), img)
-        cv2.imwrite(str(dbg / "10_header_roi.png"), header_roi)
-        cv2.imwrite(str(dbg / "11_table_roi.png"), table_roi)
-        cv2.imwrite(str(dbg / "12_footer_roi.png"), footer_roi)
-        cv2.imwrite(str(dbg / "20_header_gray.png"), header_gray)
-        cv2.imwrite(str(dbg / "21_table_gray.png"), table_gray)
-        cv2.imwrite(str(dbg / "22_footer_gray.png"), footer_gray)
+        cv2.imwrite(str(dbg / "10_table_roi.png"), table_roi)
+        cv2.imwrite(str(dbg / "20_table_gray.png"), table_gray)
+
+        dbg_img = img.copy()
+        tx, ty, tw, th = table_bbox
+        cv2.rectangle(dbg_img, (tx, ty), (tx + tw, ty + th), (0, 255, 0), 2)
 
         blue_bbox = _find_blue_header_bbox(img, cfg)
-        dbg_img = img.copy()
         if blue_bbox is not None:
             x, y, w, h = blue_bbox
             cv2.rectangle(dbg_img, (x, y), (x + w, y + h), (0, 255, 255), 2)
-
-        tx2, ty2, tw2, th2 = table_bbox
-        cv2.rectangle(dbg_img, (tx2, ty2), (tx2 + tw2, ty2 + th2), (0, 255, 0), 2)
-
-        hx, hy, hw, hh = header_bbox
-        cv2.rectangle(dbg_img, (hx, hy), (hx + hw, hy + hh), (255, 0, 255), 2)
-        fx, fy, fw, fh = footer_bbox
-        cv2.rectangle(dbg_img, (fx, fy), (fx + fw, fy + fh), (0, 0, 255), 2)
 
         dbg_words = table_roi.copy()
         for wd in table_words:
@@ -1540,24 +1438,19 @@ def extract_picking_sheet(
 
         result["debug_dir"] = str(dbg)
 
-    summary = build_picking_summary(result)
+    summary = build_table_summary(result)
     result["summary"] = summary
 
     if cfg.save_json:
-        saved_path = _save_result_json(result, cfg=cfg, source_name=source_name)
-        result["saved_json_path"] = saved_path
-
-    if cfg.save_summary_json:
-        saved_summary_path = _save_summary_json(summary, cfg=cfg, source_name=source_name)
-        result["saved_summary_json_path"] = saved_summary_path
+        result["saved_json_path"] = _save_result_json(result, cfg=cfg, source_name=source_name)
 
     return result
 
 
-def extract_picking_sheet_from_path(
+def extract_picking_table_from_path(
     image_path: str,
     *,
-    cfg: Optional[PickingConfig] = None,
+    cfg: Optional[PickingTableConfig] = None,
 ) -> Dict[str, Any]:
     img = cv2.imread(image_path)
     if img is None:
@@ -1567,7 +1460,7 @@ def extract_picking_sheet_from_path(
             "path": image_path,
             "elapsed_ms": 0,
         }
-    return extract_picking_sheet(img, cfg=cfg, source_name=Path(image_path).name)
+    return extract_picking_table(img, cfg=cfg, source_name=Path(image_path).name)
 
 
 # ============================================================
@@ -1576,32 +1469,27 @@ def extract_picking_sheet_from_path(
 def _cli() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Extract metadata and product table from a picking sheet.")
+    parser = argparse.ArgumentParser(description="Extract only the product table from a picking sheet.")
     parser.add_argument("image_path", type=str)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no_save", action="store_true")
-    parser.add_argument("--output_dir", type=str, default="data/picking")
-    parser.add_argument("--summary_output_dir", type=str, default="data/picking/summary_results")
-    parser.add_argument("--no_save_summary", action="store_true")
+    parser.add_argument("--output_dir", type=str, default="data/picking_table")
     parser.add_argument("--no_auto_rotate", action="store_true")
     parser.add_argument("--no_deskew", action="store_true")
     args = parser.parse_args()
 
-    cfg = PickingConfig(
+    cfg = PickingTableConfig(
         save_json=(not args.no_save),
         output_dir=args.output_dir,
         save_debug=args.debug,
         enable_auto_rotate=(not args.no_auto_rotate),
         enable_deskew=(not args.no_deskew),
-        summary_output_dir=args.summary_output_dir,
-        save_summary_json=(not args.no_save_summary),
     )
 
-    res = extract_picking_sheet_from_path(args.image_path, cfg=cfg)
+    res = extract_picking_table_from_path(args.image_path, cfg=cfg)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0 if res.get("status") == "success" else 2
 
 
 if __name__ == "__main__":
     raise SystemExit(_cli())
-

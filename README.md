@@ -287,6 +287,25 @@ python -m utils.vision_readout /ruta/a/imagen.jpg --mode immediate --barcode --o
 # Retry con BarCode Collect
 python -m utils.vision_readout data/tests_multibarcode/29788e64-ad4a-4d62-849c-5b22f1cb2e83.JPG --mode retry --budget 6500 --barcode_mode collect_plus --barcode_budget 6000 --no-ocr --no-qr
 
+python -m utils.vision_readout data/tests_picking/capture_barcode_test.png \
+  --mode retry \
+  --budget 16000 \
+  --barcode_mode collect_plus \
+  --barcode_budget 12000 \
+  --no-ocr \
+  --no-qr \
+  --out_json data/tests_barcode_capture/detected_barcodes_capture.json
+
+python -m utils.vision_readout data/tests_picking/tests_barcode_crop.png \
+  --mode retry \
+  --budget 16000 \
+  --barcode_mode collect_plus \
+  --barcode_budget 12000 \
+  --no-ocr \
+  --no-qr \
+  --out_json data/tests_barcode_capture/readout_full.json \
+  --out_detected_barcodes_json data/tests_barcode_capture/detected_barcodes_capture.json
+
 # especifico Schneider
 python -m utils.vision_readout /ruta/a/imagen.jpg --mode retry --barcode --ocr --no-qr --barcode_mode collect
 
@@ -347,29 +366,8 @@ python app/main.py --once --overwrite
 ``` bash
 python scripts/capture_opencv.py \
   --device 0 \
-  --width 1280 \
-  --height 720 \
-  --fps 30 \
-  --out_dir data/captures/opencv \
-  --events \
-  --auto_events \
-  --auto_method bg \
-  --auto_use_window_capture \
-  --auto_window_s 20 \
-  --auto_interval_s 1.0 \
-  --roi 180 120 950 500 \
-  --every 0 \
-  --present_frames 8 \
-  --min_fg_ratio 0.03 \
-  --min_contour_area 4000 \
-  --cooldown_s 20
-```
-
-# scripts/capture_realsense.py
-python scripts/capture_opencv.py \
-  --device 0 \
-  --width 1280 \
-  --height 720 \
+  --width 1920 \
+  --height 1080 \
   --fps 30 \
   --out_dir data/captures/opencv \
   --events \
@@ -378,11 +376,32 @@ python scripts/capture_opencv.py \
   --auto_use_window_capture \
   --auto_window_s 7 \
   --auto_interval_s 1.0 \
-  --roi 180 120 950 500 \
+  --roi 80 170 1760 760 \
   --every 0 \
   --present_frames 8 \
   --min_fg_ratio 0.03 \
-  --min_contour_area 4000 \
+  --min_contour_area 7000 \
+  --cooldown_s 20
+```
+
+# scripts/capture_realsense.py
+python scripts/capture_opencv.py \
+  --device 0 \
+  --width 1920 \
+  --height 1080 \
+  --fps 30 \
+  --out_dir data/captures/opencv \
+  --events \
+  --auto_events \
+  --auto_method bg \
+  --auto_use_window_capture \
+  --auto_window_s 7 \
+  --auto_interval_s 1.0 \
+  --roi 100 200 1720 700 \
+  --every 0 \
+  --present_frames 8 \
+  --min_fg_ratio 0.03 \
+  --min_contour_area 7000 \
   --cooldown_s 20
 
 # utils/vision_picking.py
@@ -430,6 +449,10 @@ scripts/capture_realsense.py \
   --min_contour_area 4000 \
   --cooldown_s 20
 ```
+``` bash
+sips -s format jpeg input.heic --out output.jpg
+```
+
 
 ## etapa 1; Primero generamos el consolidado:
 ``` bash
@@ -442,11 +465,36 @@ python -m app.main \
 
 # Cierre (desde el orquestador app/main.py)
 ## etapa 1; Primero generamos el consolidado:
+``` bash
 python -m app.main \
   --mode_app picking_match \
-  --picking_image data/tests_picking/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2.png \
-  --picking_excel data/tests_excel_picking/SCHNSCL01_Informe_de_Fill_Rate_OUTBOUND_v2.xlsx \
+  --picking_excel data/fillrate/latest/fillrate_latest.xlsx \
   --packstructure_excel data/tests_picking/PackStructure.xlsx
+```
+## salida etapa 1; 
+``` bash
+data/picking/summary_fillRate_packStructure/
+```
+## nombre archivo salida etapa 1 (sobreescribe); 
+``` bash
+fillrate_latest_summary_fillRate_packStructure.json
+```
+## automatizacion desde terminal (para PoC)
+
+``` bash
+while true; do
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Ejecutando fetch + matching..."
+  python3 -m utils.fillrate_gmail_fetch --out-json results/fillrate_fetch.json >> logs/fillrate_loop.log 2>&1
+  python3 -m app.main \
+    --mode_app picking_match \
+    --picking_excel data/fillrate/latest/fillrate_latest.xlsx \
+    --packstructure_excel data/tests_picking/PackStructure.xlsx \
+    --picking_out data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json >> logs/fillrate_loop.log 2>&1
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Esperando 16 minutos..."
+  sleep 960
+done
+```
+
 
 ## etapa 2; ejecutamos el cierre con el readout_result.json
 python -m app.main \
@@ -460,4 +508,25 @@ python -m app.main \
   --summary_json data/picking/summary_pickingVision_fillRate_packStructure/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2_summary_pickingVision_fillRate_packStructure.json \
   --detected_barcodes_json data/tests/manual_barcodes.json
 
-  # scripts/capture_realsense_depth.py
+  # interactivo
+  ## reset session
+  python -m app.main \
+  --mode_app closure_iterative \
+  --summary_json data/picking/summary_pickingVision_fillRate_packStructure/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2_summary_pickingVision_fillRate_packStructure.json \
+  --session_state_json data/closure/session_state_schnscl01.json \
+  --reset_session
+
+  ## complete
+
+  python -m app.main \
+  --mode_app closure_iterative \
+  --summary_json data/picking/summary_pickingVision_fillRate_packStructure/SCHNSCL01_Preparacion_Pickinglist_consolidada_Masivos_V5_2_summary_pickingVision_fillRate_packStructure.json \
+  --detected_barcodes_json data/tests_detected_barcode/detected_barcode.json \
+  --session_state_json data/closure/session_state_schnscl01.json
+
+  ## unknow
+
+  EA → unidad
+  IN → multipack
+  CS → caja
+

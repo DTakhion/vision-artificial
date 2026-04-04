@@ -31,6 +31,8 @@ tesseract
 # Detection / Segmentation (PoC rápido)
 # ----------------------------
 ultralytics>=8.2.0
+roboflow 
+dynamsoft-barcode-reader-bundle
 
 # ----------------------------
 # Utils

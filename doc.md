@@ -1,146 +1,102 @@
-# Caso de Estudio -- Límite de Decodificación por Blur (QR Detection vs QR Decode)
+## paso 1; Ground Truth (fillRate + PackStructure)
 
-## Contexto
+# extracción + normalizaciónn + consolidación + automatización
+``` bash
+while true; do
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Ejecutando fetch + matching..."
+  python3 -m utils.fillrate_gmail_fetch --out-json results/fillrate_fetch.json >> logs/fillrate_loop.log 2>&1
+  python3 -m app.main \
+    --mode_app picking_match \
+    --picking_excel data/fillrate/latest/fillrate_latest.xlsx \
+    --packstructure_excel data/tests_picking/PackStructure.xlsx \
+    --picking_out data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json >> logs/fillrate_loop.log 2>&1
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Esperando 16 minutos..."
+  sleep 960
+done
+```
 
-Durante pruebas del pipeline híbrido:
-
--   OpenCV (`QRCodeDetector`)
--   Fallback con `pyzbar` (ZBar)
--   Warp ROI por perspectiva
--   Upscaling (x2/x3/x4)
--   Sharpen + bilateral
--   Otsu / Adaptive threshold
-
-Se presentó un caso donde:
-
--   El QR **es detectado geométricamente**
--   Pero **no puede ser decodificado**
-
-------------------------------------------------------------------------
-
-## 🧪 Resultado Técnico
-
-Comando ejecutado:
+## paso 3; Cierre (app/main.py function clousure_match/clousure_iterative)
+``` bash
+python -m app.main \
+  --mode_app closure_match \
+  --readout_json results/capture_barcode_test_hybrid.json \
+  --closure_output data/closure/prueba_closure.json
+```
 
 ``` bash
-python - << 'PY'
-import cv2, numpy as np
-from utils.vision_qr import decode_qr_opencv
-img = cv2.imread("data/tests_qr/3503c836-ac26-43ea-a2eb-67202c30436b.JPG")
-res = decode_qr_opencv(img, time_budget_ms=300, variants=None)
-pts = np.array(res["points"][0], dtype=float)
-w1 = np.linalg.norm(pts[1]-pts[0])
-w2 = np.linalg.norm(pts[2]-pts[3])
-print("approx_qr_width_px:", (w1+w2)/2)
-print(res)
-PY
+python -m app.main \
+  --mode_app closure_iterative \
+  --summary_json data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json \
+  --readout_json results/capture_barcode_test_hybrid.json \
+  --session_state_json data/closure/session_state_schnscl01.json \
+  --closure_output data/closure/prueba_closure_iterative.json \
+  --reset_session
 ```
 
-Salida:
+``` bash
+python -m app.main \
+  --mode_app closure_iterative \
+  --summary_json data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json \
+  --readout_json results/capture_barcode_test_hybrid.json \
+  --session_state_json data/closure/session_state_schnscl01.json \
+  --closure_output data/closure/prueba_closure_iterative.json \
+```
+# paso 2, para PoC
 
-    approx_qr_width_px: 417.5972843895515
-
-``` json
-{
-  "status": "not_found",
-  "text": null,
-  "points": [[[186.0, 563.0], [598.0, 567.0], [611.1367, 970.3723], [189.0, 1000.0]]],
-  "backend": "opencv",
-  "elapsed_ms": 414,
-  "variant": null,
-  "tried": ["gray", "sharp", "bilateral", "bilateral_sharp", "bilateral_x2"]
-}
+``` bash
+python scripts/capture_opencv.py \     
+  --device 0 \
+  --width 1920 \
+  --height 1080 \
+  --fps 30 \                                           
+  --out_dir data/captures/opencv \
+  --events \                                           
+  --auto_events \
+  --auto_method bg \
+  --auto_use_window_capture \
+  --auto_window_s 7 \
+  --auto_interval_s 1.0 \
+  --roi 80 80 1700 900 \
+  --every 0 \
+  --present_frames 8 \
+  --min_fg_ratio 0.03 \
+  --min_contour_area 7000 \
+  --cooldown_s 10
 ```
 
-------------------------------------------------------------------------
+# Paso 2, 4k, para PoC
 
-## 🔎 Análisis Técnico
+``` bash
+python scripts/capture_opencv.py \
+  --device 0 \
+  --width 3840 \
+  --height 2160 \
+  --fps 30 \
+  --out_dir data/captures/opencv \
+  --events \
+  --auto_events \
+  --auto_method bg \
+  --auto_use_window_capture \
+  --auto_window_s 7 \
+  --auto_interval_s 1.0 \
+  --roi 160 160 3400 1800 \
+  --every 0 \
+  --present_frames 8 \
+  --min_fg_ratio 0.03 \
+  --min_contour_area 7000 \
+  --cooldown_s 10
+```
 
-Observaciones clave:
+# paso 2, para MvP
 
-1.  OpenCV **detecta correctamente el cuadrilátero del QR**.
-2.  El ancho efectivo del QR es \~**417 px**.
-3.  A pesar de ello:
-    -   OpenCV no logra decodificar.
-    -   `pyzbar` tampoco logra decodificar.
-    -   Warp ROI + upscales x4 tampoco rescatan el caso.
-    -   Sharpen + Otsu + Adaptive threshold tampoco funcionan.
-
-### Conclusión técnica:
-
-> El problema no es tamaño geométrico, sino **pérdida de detalle por
-> blur (desenfoque / movimiento)**.
-
-El QR está suficientemente grande en pixeles, pero: - Los módulos
-internos están suavizados. - La frecuencia espacial necesaria para
-reconstrucción del patrón se perdió. - No existe información suficiente
-para que ningún decoder reconstruya los bits.
-
-Esto representa un **límite físico de señal**, no un límite de
-algoritmo.
-
-------------------------------------------------------------------------
-
-## 🧠 Insight Importante para el PoC
-
-Este caso valida que:
-
--   El pipeline híbrido está funcionando correctamente.
--   Se están intentando variantes robustas.
--   Se está explotando la detección geométrica.
--   Se está usando fallback avanzado.
--   El fallo es legítimo y explicable.
-
-------------------------------------------------------------------------
-
-## 📏 Regla Operativa Derivada
-
-La decodificación de QR depende de:
-
-1.  Tamaño efectivo (px por lado)
-2.  Nitidez (resolución espacial real)
-3.  Nivel de blur
-4.  Contraste
-
-Incluso con \>400 px de ancho, si el blur destruye los bordes de los
-módulos:
-
-> La decodificación puede ser imposible.
-
-------------------------------------------------------------------------
-
-## 🎯 Recomendaciones de Captura para Operación en Terreno
-
-Para evitar este tipo de fallo:
-
--   El QR debe ocupar al menos **1/4 del ancho del frame**
--   Evitar movimiento (mejor iluminación → menor tiempo de exposición)
--   No usar zoom digital
--   Mantener ángulo \< 30°
--   Enfocar a distancia media (\~30--50 cm)
--   Evitar vibración al disparar
-
-------------------------------------------------------------------------
-
-## 🏁 Conclusión
-
-Este caso no representa un fallo del sistema, sino:
-
-> Un límite físico inherente a la adquisición de imagen.
-
-Es un resultado técnicamente válido y documentable en el PoC.
-
-------------------------------------------------------------------------
-
-## 📚 Nota Estratégica
-
-En proyectos de visión artificial, la mayoría de los fallos en
-producción no son de modelo o algoritmo, sino de:
-
--   Calidad de captura
--   Iluminación
--   Movimiento
--   Enfoque
--   Ángulo
-
-Este caso confirma esa realidad.
+``` bash
+python scripts/capture_opencv.py \
+  --device 0 \
+  --width 1920 \
+  --height 1080 \
+  --fps 30 \
+  --out_dir data/captures/opencv \
+  --events \
+  --roi 80 80 1700 900 \
+  --every 0
+```

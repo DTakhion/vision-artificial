@@ -48,9 +48,17 @@ htmlcov/
 .vscode/
 
 # ----------------------------
-# Data (CRÍTICO en visión industrial)
+# Data
 # ----------------------------
 data/
+!data/fillrate/
+!data/fillrate/latest/
+!data/fillrate/latest/fillrate_latest.xlsx
+
+!data/tests_picking/
+!data/tests_picking/PackStructure.xlsx
+!data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json
+
 datasets/
 captures/
 *.mp4
@@ -64,18 +72,26 @@ captures/
 *.bmp
 
 # ----------------------------
-# Model weights / checkpoints
+# YOLO runs (permitir solo modelos específicos)
 # ----------------------------
-models/
-*.pt
-*.pth
-*.onnx
-*.engine
-*.ckpt
+runs/*
+!runs/detect/
+!runs/detect/runs_kuehne_nagel/
+!runs/detect/runs_kuehne_nagel/barcode_v1/
+!runs/detect/runs_kuehne_nagel/barcode_v1/weights/
+!runs/detect/runs_kuehne_nagel/barcode_v1/weights/best.pt
+!runs/detect/runs_kuehne_nagel/barcode_v1/weights/last.pt
+!runs/detect/runs_kuehne_nagel/barcode_v1/args.yaml
+
+!runs/detect/train2/
+!runs/detect/train2/weights/
+!runs/detect/train2/weights/best.pt
+!runs/detect/train2/weights/last.pt
+
+yolov8*.pt
 
 # ----------------------------
 # Temporary outputs
 # ----------------------------
 outputs/
 results/
-runs/

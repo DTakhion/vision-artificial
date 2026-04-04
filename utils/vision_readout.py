@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, List, Union
 import time
+import json
+from pathlib import Path
 
 import numpy as np
 
@@ -10,6 +12,8 @@ from utils.vision_qr import decode_qr_opencv
 from utils.vision_barcode import decode_barcode_1d
 from utils.vision_barcode_plus import decode_barcode_1d_plus
 from utils.vision_ocr import ocr_serial_best_effort
+#from utils.vision_barcode_yolo import detect_and_decode_with_yolo
+#from utils.vision_barcode import decode_barcode_1d
 
 
 def _ms_since(t0: float) -> int:
@@ -36,6 +40,86 @@ def _pending_stage_payload(kind: str) -> Dict[str, Any]:
         "kind": kind,
         "elapsed_ms": 0,
     }
+
+
+def _norm_barcode(txt: Any) -> str:
+    s = "" if txt is None else str(txt)
+    return "".join(ch for ch in s if ch.isdigit())
+
+
+def _dedupe_preserve_order(items: List[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for raw in items:
+        value = _norm_barcode(raw)
+        if not value:
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _extract_detected_barcodes_payload(readout_res: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Devuelve un payload plano compatible con app.main --detected_barcodes_json:
+    {
+      "detected_barcodes": [...]
+    }
+    """
+    barcode_res = readout_res.get("barcode1d") or {}
+    items: List[str] = []
+
+    mode = str(barcode_res.get("mode") or "").strip().lower()
+
+    if barcode_res.get("status") == "success":
+        if mode == "collect_plus":
+            confirmed = barcode_res.get("confirmed_items") or []
+            if confirmed:
+                for it in confirmed:
+                    txt = _norm_barcode(it.get("text"))
+                    if txt:
+                        items.append(txt)
+            else:
+                fallback_items = barcode_res.get("items") or []
+                for it in fallback_items:
+                    txt = _norm_barcode(it.get("text"))
+                    if txt:
+                        items.append(txt)
+        else:
+            fallback_items = barcode_res.get("items") or []
+            for it in fallback_items:
+                txt = _norm_barcode(it.get("text"))
+                if txt:
+                    items.append(txt)
+
+    # Rescate adicional desde best, por si no vino en items por alguna razón
+    best = readout_res.get("best") or {}
+    if isinstance(best, dict) and best.get("kind") == "barcode1d":
+        txt = _norm_barcode(best.get("text"))
+        if txt:
+            items.append(txt)
+
+    detected_barcodes = _dedupe_preserve_order(items)
+
+    return {
+        "status": "success",
+        "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "detected_barcodes": detected_barcodes,
+        "counts": {
+            "detected_barcodes": len(detected_barcodes),
+        },
+    }
+
+
+def _safe_write_json(path_str: str, payload: Dict[str, Any]) -> None:
+    path = Path(path_str)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    tmp.replace(path)
 
 
 def _get_barcode_items_for_readout(barcode_res: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -347,11 +431,6 @@ def readout_immediate(
       - Barcode: ON
       - OCR: OFF
       - QR: OFF
-
-    Nota:
-      En immediate dejamos tile sweep / rotations OFF por defecto
-      para proteger latencia. Se pueden activar por parámetro.
-      collect_plus está permitido, pero úsalo con criterio porque cuesta más.
     """
     t0 = time.perf_counter()
 
@@ -382,7 +461,6 @@ def readout_immediate(
         "stage_elapsed_ms": {},
     }
 
-    # 1) Barcode
     if enable_barcode:
         remaining = int(time_budget_ms) - _ms_since(t0)
         if remaining > 70:
@@ -411,7 +489,6 @@ def readout_immediate(
     out["barcode1d"] = barcode_res
     out["stage_elapsed_ms"]["barcode_ms"] = int(barcode_res.get("elapsed_ms", 0))
 
-    # 2) OCR
     if enable_ocr:
         remaining = int(time_budget_ms) - _ms_since(t0)
         if remaining > 120:
@@ -437,7 +514,6 @@ def readout_immediate(
     out["serial"] = serial_res
     out["stage_elapsed_ms"]["ocr_ms"] = int(serial_res.get("elapsed_ms", 0))
 
-    # 3) QR
     if enable_qr:
         remaining = int(time_budget_ms) - _ms_since(t0)
         if remaining > 60:
@@ -511,11 +587,6 @@ def readout_retry(
       1) Barcode
       2) OCR
       3) QR
-
-    Nota:
-      En retry dejamos tile sweep / rotations ON por defecto,
-      porque aquí priorizamos recall.
-      collect_plus es válido cuando quieras más exploración espacial.
     """
     t0 = time.perf_counter()
 
@@ -545,7 +616,6 @@ def readout_retry(
         "stage_elapsed_ms": {},
     }
 
-    # 1) Barcode
     if enable_barcode:
         remaining = int(time_budget_ms) - _ms_since(t0)
         if remaining > 120:
@@ -574,7 +644,6 @@ def readout_retry(
     out["barcode1d"] = barcode_res
     out["stage_elapsed_ms"]["barcode_ms"] = int(barcode_res.get("elapsed_ms", 0))
 
-    # 2) OCR
     if enable_ocr:
         remaining = int(time_budget_ms) - _ms_since(t0)
         if remaining > 220:
@@ -600,7 +669,6 @@ def readout_retry(
     out["serial"] = serial_res
     out["stage_elapsed_ms"]["ocr_ms"] = int(serial_res.get("elapsed_ms", 0))
 
-    # 3) QR
     if enable_qr:
         remaining = int(time_budget_ms) - _ms_since(t0)
         if remaining > 100:
@@ -695,6 +763,20 @@ if __name__ == "__main__":
     parser.add_argument("--ocr_min_digits", type=int, default=4, help="minimum numeric OCR length")
     parser.add_argument("--ocr_max_rois", type=int, default=4, help="max OCR ROIs")
 
+    # outputs
+    parser.add_argument(
+        "--out_json",
+        type=str,
+        default=None,
+        help="Ruta para guardar el resultado completo del readout en JSON",
+    )
+    parser.add_argument(
+        "--out_detected_barcodes_json",
+        type=str,
+        default=None,
+        help="Ruta para guardar un JSON plano compatible con app.main: {'detected_barcodes': [...]}",
+    )
+
     args = parser.parse_args()
 
     img = cv2.imread(args.image)
@@ -763,5 +845,14 @@ if __name__ == "__main__":
             ocr_min_numeric_len=int(args.ocr_min_digits),
             ocr_max_rois=int(args.ocr_max_rois),
         )
+
+    if args.out_json:
+        _safe_write_json(args.out_json, res)
+        print(f"[OK] Resultado readout guardado en: {args.out_json}")
+
+    if args.out_detected_barcodes_json:
+        detected_payload = _extract_detected_barcodes_payload(res)
+        _safe_write_json(args.out_detected_barcodes_json, detected_payload)
+        print(f"[OK] Detected barcodes guardado en: {args.out_detected_barcodes_json}")
 
     print(res)
