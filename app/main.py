@@ -396,9 +396,24 @@ def _norm_code(txt: Any) -> str:
     return s
 
 
-def _norm_barcode(txt: Any) -> str:
-    s = "" if txt is None else str(txt)
-    return "".join(ch for ch in s if ch.isdigit())
+# def _norm_barcode(txt: Any) -> str:
+#     s = "" if txt is None else str(txt)
+#     return "".join(ch for ch in s if ch.isdigit())
+
+def _norm_barcode(x: Any) -> Optional[str]:
+    if x is None:
+        return None
+
+    s = str(x).strip()
+
+    # SOLO números
+    s = "".join(c for c in s if c.isdigit())
+
+    # 👉 VALIDACIÓN CRÍTICA
+    if len(s) not in (8, 12, 13, 14):
+        return None
+
+    return s
 
 
 def _norm_estado_orden_display(txt: Any) -> str:
@@ -439,6 +454,250 @@ def _dedupe_strings_preserve_order(items: List[Any]) -> List[str]:
         seen.add(value)
         out.append(value)
     return out
+
+def _extract_summary_products(summary_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(summary_payload, dict):
+        return []
+
+    summary = summary_payload.get("summary_fillRate_packStructure")
+    if isinstance(summary, dict) and isinstance(summary.get("products"), list):
+        return summary.get("products") or []
+
+    if isinstance(summary_payload.get("products"), list):
+        return summary_payload.get("products") or []
+
+    return []
+
+
+def _build_barcode_to_shipping_index(summary_payload: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Índice:
+    barcode -> [
+      {
+        "sku": ...,
+        "shipping": ...,
+        "ruta": ...,
+        "units_per_barcode": ...,
+        "cant_original_total_sku": ...,
+        "shipping_expected_units": ...,
+      },
+      ...
+    ]
+    """
+    products = _extract_summary_products(summary_payload)
+
+    # 1) total esperado por shipping
+    shipping_expected_totals: Dict[str, int] = {}
+    for prod in products:
+        shipping_values = prod.get("shipping_values") or []
+        if not isinstance(shipping_values, list):
+            shipping_values = []
+
+        # Para MVP: usamos shipping único por SKU
+        if len(shipping_values) != 1:
+            continue
+
+        shipping = str(shipping_values[0]).strip()
+        if not shipping:
+            continue
+
+        try:
+            qty = int(prod.get("cant_original_total") or 0)
+        except Exception:
+            qty = 0
+
+        shipping_expected_totals[shipping] = shipping_expected_totals.get(shipping, 0) + qty
+
+    # 2) barcode -> shipping candidates
+    idx: Dict[str, List[Dict[str, Any]]] = {}
+
+    for prod in products:
+        sku = _norm_code(prod.get("sku"))
+        if not sku:
+            continue
+
+        shipping_values = prod.get("shipping_values") or []
+        ruta_values = prod.get("ruta_values") or []
+
+        shipping = str(shipping_values[0]).strip() if isinstance(shipping_values, list) and len(shipping_values) == 1 else None
+        ruta = str(ruta_values[0]).strip() if isinstance(ruta_values, list) and len(ruta_values) == 1 else None
+
+        try:
+            cant_original_total = int(prod.get("cant_original_total") or 0)
+        except Exception:
+            cant_original_total = 0
+
+        barcode_fields = [
+            ("EA", prod.get("ean_ea"), prod.get("qty_ea")),
+            ("IN", prod.get("ean_in"), prod.get("qty_inn")),
+            ("CS", prod.get("ean_cs"), prod.get("qty_cs")),
+        ]
+
+        for level, raw_barcode, raw_units in barcode_fields:
+            barcode = _norm_barcode(raw_barcode)
+            if not barcode:
+                continue
+
+            try:
+                units_per_barcode = int(raw_units or 0)
+            except Exception:
+                units_per_barcode = 0
+
+            if units_per_barcode <= 0:
+                continue
+
+            idx.setdefault(barcode, []).append(
+                {
+                    "sku": sku,
+                    "shipping": shipping,
+                    "ruta": ruta,
+                    "level": level,
+                    "units_per_barcode": units_per_barcode,
+                    "cant_original_total_sku": cant_original_total,
+                    "shipping_expected_units": shipping_expected_totals.get(shipping, 0) if shipping else 0,
+                }
+            )
+
+    return idx
+
+
+def _resolve_target_shipping_from_barcodes(
+    *,
+    summary_payload: Dict[str, Any],
+    detected_barcodes_all: List[str],
+) -> Dict[str, Any]:
+    """
+    Regla MVP:
+    - si un barcode apunta a un único shipping -> resolved_unique
+    - si aparecen varios shipping distintos -> ambiguous
+    - si no matchea nada -> not_found
+    """
+    barcode_to_shipping = _build_barcode_to_shipping_index(summary_payload)
+
+    resolved_candidates: List[Dict[str, Any]] = []
+    distinct_shippings = set()
+
+    for raw in detected_barcodes_all:
+        barcode = _norm_barcode(raw)
+        if not barcode:
+            continue
+
+        candidates = barcode_to_shipping.get(barcode, [])
+        if not candidates:
+            continue
+
+        valid = [c for c in candidates if c.get("shipping")]
+        unique_shipping_values = sorted({c["shipping"] for c in valid if c.get("shipping")})
+
+        if len(unique_shipping_values) == 1:
+            shipping = unique_shipping_values[0]
+            distinct_shippings.add(shipping)
+
+            chosen = None
+            for c in valid:
+                if c.get("shipping") == shipping:
+                    chosen = c
+                    break
+
+            if chosen:
+                resolved_candidates.append(
+                    {
+                        "barcode": barcode,
+                        "shipping": shipping,
+                        "ruta": chosen.get("ruta"),
+                        "sku": chosen.get("sku"),
+                        "level": chosen.get("level"),
+                        "units_per_barcode": chosen.get("units_per_barcode"),
+                        "shipping_expected_units": chosen.get("shipping_expected_units", 0),
+                    }
+                )
+
+    if not resolved_candidates:
+        return {
+            "status": "not_found",
+            "target_shipping": None,
+            "target_ruta": None,
+            "target_sku": None,
+            "target_shipping_expected_units": 0,
+            "resolved_from_barcode": None,
+            "resolved_candidates": [],
+        }
+
+    if len(distinct_shippings) > 1:
+        return {
+            "status": "ambiguous",
+            "target_shipping": None,
+            "target_ruta": None,
+            "target_sku": None,
+            "target_shipping_expected_units": 0,
+            "resolved_from_barcode": None,
+            "resolved_candidates": resolved_candidates,
+        }
+
+    chosen = resolved_candidates[0]
+    return {
+        "status": "resolved_unique",
+        "target_shipping": chosen.get("shipping"),
+        "target_ruta": chosen.get("ruta"),
+        "target_sku": chosen.get("sku"),
+        "target_shipping_expected_units": int(chosen.get("shipping_expected_units") or 0),
+        "resolved_from_barcode": chosen.get("barcode"),
+        "resolved_candidates": resolved_candidates,
+    }
+
+
+def _compute_observed_units_for_target_shipping(
+    *,
+    summary_payload: Dict[str, Any],
+    detected_barcodes_all: List[str],
+    target_shipping: Optional[str],
+) -> Dict[str, Any]:
+    if not target_shipping:
+        return {
+            "observed_units": 0,
+            "barcode_hits_in_target_shipping": {},
+            "matched_items": [],
+        }
+
+    barcode_to_shipping = _build_barcode_to_shipping_index(summary_payload)
+
+    observed_units = 0
+    barcode_hits_in_target_shipping: Dict[str, int] = {}
+    matched_items: List[Dict[str, Any]] = []
+
+    for raw in detected_barcodes_all:
+        barcode = _norm_barcode(raw)
+        if not barcode:
+            continue
+
+        candidates = barcode_to_shipping.get(barcode, [])
+        matched = None
+        for c in candidates:
+            if c.get("shipping") == target_shipping:
+                matched = c
+                break
+
+        if not matched:
+            continue
+
+        units_per_barcode = int(matched.get("units_per_barcode") or 0)
+        observed_units += units_per_barcode
+        barcode_hits_in_target_shipping[barcode] = barcode_hits_in_target_shipping.get(barcode, 0) + 1
+        matched_items.append(
+            {
+                "barcode": barcode,
+                "sku": matched.get("sku"),
+                "level": matched.get("level"),
+                "units_per_barcode": units_per_barcode,
+                "shipping": target_shipping,
+            }
+        )
+
+    return {
+        "observed_units": observed_units,
+        "barcode_hits_in_target_shipping": barcode_hits_in_target_shipping,
+        "matched_items": matched_items,
+    }
 
 def _build_fillrate_full_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     excel_full = row.get("excel_full", {}) or {}
@@ -513,11 +772,18 @@ def _load_detected_barcodes_json(path: Path) -> Optional[List[str]]:
     return None
 
 
+# def _parse_manual_barcodes(manual_barcodes: Optional[str]) -> List[str]:
+#     if not manual_barcodes:
+#         return []
+#     parts = [x.strip() for x in manual_barcodes.split(",")]
+#     return _dedupe_preserve_order(parts)
+
 def _parse_manual_barcodes(manual_barcodes: Optional[str]) -> List[str]:
     if not manual_barcodes:
         return []
+
     parts = [x.strip() for x in manual_barcodes.split(",")]
-    return _dedupe_preserve_order(parts)
+    return [_norm_barcode(x) for x in parts if _norm_barcode(x)]
 
 
 def _build_fillrate_index(match_result: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -1076,25 +1342,375 @@ def run_closure_match(
 # ============================================================
 # Closure Iterative (acumulado de barcodes por sesión)
 # ============================================================
+# class ClosureSession:
+#     def __init__(
+#         self,
+#         summary_payload: Dict[str, Any],
+#         state_path: Optional[Path] = None,
+#         summary_json_path: Optional[Path] = None,
+#     ):
+#         self.summary_payload = summary_payload
+#         self.state_path = state_path
+#         self.summary_json_path = summary_json_path
+
+#         now_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+#         self.session_id: str = f"closure_session_{time.strftime('%Y%m%d_%H%M%S')}"
+#         self.session_status: str = "open"
+#         self.created_at_local: str = now_local
+#         self.updated_at_local: str = now_local
+#         self.closed_at_local: Optional[str] = None
+
+#         self.detected_barcodes: List[str] = []
+#         self.captures_processed: List[Dict[str, Any]] = []
+#         self.last_readout_json: Optional[str] = None
+#         self.last_detected_barcodes_json: Optional[str] = None
+#         self.last_manual_barcodes: List[str] = []
+#         self.last_closure_status: Optional[str] = None
+
+#         if self.state_path and self.state_path.exists():
+#             state_payload = safe_read_json(self.state_path)
+#             if isinstance(state_payload, dict):
+#                 self._load_from_payload(state_payload)
+
+#     def _load_from_payload(self, payload: Dict[str, Any]) -> None:
+#         self.session_id = str(payload.get("session_id") or self.session_id)
+#         self.session_status = str(payload.get("session_status") or "open")
+#         self.created_at_local = str(payload.get("created_at_local") or self.created_at_local)
+#         self.updated_at_local = str(payload.get("updated_at_local") or self.updated_at_local)
+
+#         closed_at = payload.get("closed_at_local")
+#         self.closed_at_local = str(closed_at) if closed_at else None
+
+#         prev = payload.get("detected_barcodes", [])
+#         if isinstance(prev, list):
+#             self.detected_barcodes = _dedupe_preserve_order(prev)
+
+#         captures = payload.get("captures_processed", [])
+#         if isinstance(captures, list):
+#             clean_captures: List[Dict[str, Any]] = []
+#             for item in captures:
+#                 if isinstance(item, dict):
+#                     clean_captures.append(item)
+#             self.captures_processed = clean_captures
+
+#         self.last_readout_json = payload.get("last_readout_json")
+#         self.last_detected_barcodes_json = payload.get("last_detected_barcodes_json")
+
+#         last_manual = payload.get("last_manual_barcodes", [])
+#         if isinstance(last_manual, list):
+#             self.last_manual_barcodes = _dedupe_preserve_order(last_manual)
+
+#         self.last_closure_status = payload.get("last_closure_status")
+
+#     def get_barcodes(self) -> List[str]:
+#         return list(self.detected_barcodes)
+
+#     def get_captures_processed(self) -> List[Dict[str, Any]]:
+#         return list(self.captures_processed)
+
+#     def update(self, new_barcodes: List[str]) -> None:
+#         merged = list(self.detected_barcodes) + list(new_barcodes)
+#         self.detected_barcodes = _dedupe_preserve_order(merged)
+#         self.updated_at_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+#     def register_capture(
+#         self,
+#         *,
+#         readout_json: Optional[Path] = None,
+#         detected_barcodes_json: Optional[Path] = None,
+#         manual_barcodes: Optional[List[str]] = None,
+#         new_barcodes: Optional[List[str]] = None,
+#     ) -> None:
+#         ts_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+#         readout_json_str = str(readout_json) if readout_json else None
+#         detected_barcodes_json_str = str(detected_barcodes_json) if detected_barcodes_json else None
+#         manual_list = _dedupe_preserve_order(manual_barcodes or [])
+#         new_barcodes_list = _dedupe_preserve_order(new_barcodes or [])
+
+#         event_dir = None
+#         if readout_json is not None:
+#             try:
+#                 event_dir = str(readout_json.parent)
+#             except Exception:
+#                 event_dir = None
+
+#         entry = {
+#             "processed_at_local": ts_local,
+#             "readout_json": readout_json_str,
+#             "event_dir": event_dir,
+#             "detected_barcodes_json": detected_barcodes_json_str,
+#             "manual_barcodes": manual_list,
+#             "new_barcodes": new_barcodes_list,
+#             "new_barcodes_count": len(new_barcodes_list),
+#         }
+
+#         duplicate = False
+#         if readout_json_str:
+#             for prev in self.captures_processed:
+#                 if not isinstance(prev, dict):
+#                     continue
+#                 if prev.get("readout_json") == readout_json_str:
+#                     duplicate = True
+#                     break
+
+#         if not duplicate:
+#             self.captures_processed.append(entry)
+
+#         self.last_readout_json = readout_json_str
+#         self.last_detected_barcodes_json = detected_barcodes_json_str
+#         self.last_manual_barcodes = manual_list
+#         self.updated_at_local = ts_local
+
+#     def set_closure_status(self, closure_status: Optional[str]) -> None:
+#         self.last_closure_status = closure_status
+#         self.updated_at_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+#     def mark_closed(self) -> None:
+#         now_local = time.strftime("%Y-%m-%d %H:%M:%S")
+#         self.session_status = "closed"
+#         self.closed_at_local = now_local
+#         self.updated_at_local = now_local
+
+#     def reopen(self) -> None:
+#         self.session_status = "open"
+#         self.closed_at_local = None
+#         self.updated_at_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+#     def save(self) -> None:
+#         if not self.state_path:
+#             return
+
+#         payload = {
+#             "status": "success",
+#             "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
+#             "session_id": self.session_id,
+#             "session_status": self.session_status,
+#             "created_at_local": self.created_at_local,
+#             "updated_at_local": self.updated_at_local,
+#             "closed_at_local": self.closed_at_local,
+#             "summary_json": str(self.summary_json_path) if self.summary_json_path else None,
+#             "last_readout_json": self.last_readout_json,
+#             "last_detected_barcodes_json": self.last_detected_barcodes_json,
+#             "last_manual_barcodes": self.last_manual_barcodes,
+#             "last_closure_status": self.last_closure_status,
+#             "detected_barcodes": self.get_barcodes(),
+#             "captures_processed": self.get_captures_processed(),
+#             "counts": {
+#                 "detected_barcodes": len(self.detected_barcodes),
+#                 "captures_processed": len(self.captures_processed),
+#             },
+#         }
+#         safe_write_json(self.state_path, payload)
+
+#     def clear(self) -> None:
+#         now_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+#         self.session_id = f"closure_session_{time.strftime('%Y%m%d_%H%M%S')}"
+#         self.session_status = "open"
+#         self.created_at_local = now_local
+#         self.updated_at_local = now_local
+#         self.closed_at_local = None
+
+#         self.detected_barcodes = []
+#         self.captures_processed = []
+#         self.last_readout_json = None
+#         self.last_detected_barcodes_json = None
+#         self.last_manual_barcodes = []
+#         self.last_closure_status = None
+
+#         self.save()
+
 class ClosureSession:
-    def __init__(self, summary_payload: Dict[str, Any], state_path: Optional[Path] = None):
+    def __init__(
+        self,
+        summary_payload: Dict[str, Any],
+        state_path: Optional[Path] = None,
+        summary_json_path: Optional[Path] = None,
+    ):
         self.summary_payload = summary_payload
         self.state_path = state_path
-        self.detected_barcodes: List[str] = []
+        self.summary_json_path = summary_json_path
+
+        now_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        self.session_id: str = f"closure_session_{time.strftime('%Y%m%d_%H%M%S')}"
+        self.session_status: str = "open"
+        self.created_at_local: str = now_local
+        self.updated_at_local: str = now_local
+        self.closed_at_local: Optional[str] = None
+
+        # NUEVO: acumulado real con repetidos
+        self.detected_barcodes_all: List[str] = []
+        # apoyo/debug
+        self.detected_barcodes_unique: List[str] = []
+
+        self.captures_processed: List[Dict[str, Any]] = []
+        self.last_readout_json: Optional[str] = None
+        self.last_detected_barcodes_json: Optional[str] = None
+        self.last_manual_barcodes: List[str] = []
+        self.last_closure_status: Optional[str] = None
+
+        # NUEVO: resolución de shipping objetivo
+        self.shipping_resolution_status: str = "pending"
+        self.target_shipping: Optional[str] = None
+        self.target_ruta: Optional[str] = None
+        self.target_sku: Optional[str] = None
+        self.target_shipping_expected_units: int = 0
+        self.target_shipping_observed_units: int = 0
+        self.resolved_from_barcode: Optional[str] = None
 
         if self.state_path and self.state_path.exists():
             state_payload = safe_read_json(self.state_path)
             if isinstance(state_payload, dict):
-                prev = state_payload.get("detected_barcodes", [])
-                if isinstance(prev, list):
-                    self.detected_barcodes = _dedupe_preserve_order(prev)
+                self._load_from_payload(state_payload)
+
+    def _load_from_payload(self, payload: Dict[str, Any]) -> None:
+        self.session_id = str(payload.get("session_id") or self.session_id)
+        self.session_status = str(payload.get("session_status") or "open")
+        self.created_at_local = str(payload.get("created_at_local") or self.created_at_local)
+        self.updated_at_local = str(payload.get("updated_at_local") or self.updated_at_local)
+
+        closed_at = payload.get("closed_at_local")
+        self.closed_at_local = str(closed_at) if closed_at else None
+
+        prev_all = payload.get("detected_barcodes_all", [])
+        if isinstance(prev_all, list):
+            self.detected_barcodes_all = [_norm_barcode(x) for x in prev_all if _norm_barcode(x)]
+
+        # backward compatibility
+        if not self.detected_barcodes_all:
+            prev = payload.get("detected_barcodes", [])
+            if isinstance(prev, list):
+                self.detected_barcodes_all = [_norm_barcode(x) for x in prev if _norm_barcode(x)]
+
+        self.detected_barcodes_unique = _dedupe_preserve_order(self.detected_barcodes_all)
+
+        captures = payload.get("captures_processed", [])
+        if isinstance(captures, list):
+            clean_captures: List[Dict[str, Any]] = []
+            for item in captures:
+                if isinstance(item, dict):
+                    clean_captures.append(item)
+            self.captures_processed = clean_captures
+
+        self.last_readout_json = payload.get("last_readout_json")
+        self.last_detected_barcodes_json = payload.get("last_detected_barcodes_json")
+
+        last_manual = payload.get("last_manual_barcodes", [])
+        if isinstance(last_manual, list):
+            self.last_manual_barcodes = _dedupe_preserve_order(last_manual)
+
+        self.last_closure_status = payload.get("last_closure_status")
+
+        self.shipping_resolution_status = str(payload.get("shipping_resolution_status") or "pending")
+        self.target_shipping = payload.get("target_shipping")
+        self.target_ruta = payload.get("target_ruta")
+        self.target_sku = payload.get("target_sku")
+        self.target_shipping_expected_units = int(payload.get("target_shipping_expected_units") or 0)
+        self.target_shipping_observed_units = int(payload.get("target_shipping_observed_units") or 0)
+        self.resolved_from_barcode = payload.get("resolved_from_barcode")
 
     def get_barcodes(self) -> List[str]:
-        return list(self.detected_barcodes)
+        return list(self.detected_barcodes_all)
+
+    def get_unique_barcodes(self) -> List[str]:
+        return list(self.detected_barcodes_unique)
+
+    def get_captures_processed(self) -> List[Dict[str, Any]]:
+        return list(self.captures_processed)
 
     def update(self, new_barcodes: List[str]) -> None:
-        merged = list(self.detected_barcodes) + list(new_barcodes)
-        self.detected_barcodes = _dedupe_preserve_order(merged)
+        clean_new = [_norm_barcode(x) for x in new_barcodes if _norm_barcode(x)]
+        self.detected_barcodes_all.extend(clean_new)
+        self.detected_barcodes_unique = _dedupe_preserve_order(self.detected_barcodes_all)
+        self.updated_at_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def register_capture(
+        self,
+        *,
+        readout_json: Optional[Path] = None,
+        detected_barcodes_json: Optional[Path] = None,
+        manual_barcodes: Optional[List[str]] = None,
+        new_barcodes: Optional[List[str]] = None,
+    ) -> None:
+        ts_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        readout_json_str = str(readout_json) if readout_json else None
+        detected_barcodes_json_str = str(detected_barcodes_json) if detected_barcodes_json else None
+        manual_list = [_norm_barcode(x) for x in (manual_barcodes or []) if _norm_barcode(x)]
+        new_barcodes_list = [_norm_barcode(x) for x in (new_barcodes or []) if _norm_barcode(x)]
+
+        event_dir = None
+        if readout_json is not None:
+            try:
+                event_dir = str(readout_json.parent)
+            except Exception:
+                event_dir = None
+
+        entry = {
+            "processed_at_local": ts_local,
+            "readout_json": readout_json_str,
+            "event_dir": event_dir,
+            "detected_barcodes_json": detected_barcodes_json_str,
+            "manual_barcodes": manual_list,
+            "new_barcodes": new_barcodes_list,
+            "new_barcodes_count": len(new_barcodes_list),
+            "new_barcodes_unique_count": len(_dedupe_preserve_order(new_barcodes_list)),
+        }
+
+        duplicate = False
+        if readout_json_str:
+            for prev in self.captures_processed:
+                if not isinstance(prev, dict):
+                    continue
+                if prev.get("readout_json") == readout_json_str:
+                    duplicate = True
+                    break
+
+        if not duplicate:
+            self.captures_processed.append(entry)
+
+        self.last_readout_json = readout_json_str
+        self.last_detected_barcodes_json = detected_barcodes_json_str
+        self.last_manual_barcodes = _dedupe_preserve_order(manual_list)
+        self.updated_at_local = ts_local
+
+    def set_closure_status(self, closure_status: Optional[str]) -> None:
+        self.last_closure_status = closure_status
+        self.updated_at_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def set_target_shipping_resolution(
+        self,
+        *,
+        status: str,
+        target_shipping: Optional[str] = None,
+        target_ruta: Optional[str] = None,
+        target_sku: Optional[str] = None,
+        target_shipping_expected_units: int = 0,
+        target_shipping_observed_units: int = 0,
+        resolved_from_barcode: Optional[str] = None,
+    ) -> None:
+        self.shipping_resolution_status = status
+        self.target_shipping = target_shipping
+        self.target_ruta = target_ruta
+        self.target_sku = target_sku
+        self.target_shipping_expected_units = int(target_shipping_expected_units or 0)
+        self.target_shipping_observed_units = int(target_shipping_observed_units or 0)
+        self.resolved_from_barcode = resolved_from_barcode
+        self.updated_at_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def mark_closed(self) -> None:
+        now_local = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.session_status = "closed"
+        self.closed_at_local = now_local
+        self.updated_at_local = now_local
+
+    def reopen(self) -> None:
+        self.session_status = "open"
+        self.closed_at_local = None
+        self.updated_at_local = time.strftime("%Y-%m-%d %H:%M:%S")
 
     def save(self) -> None:
         if not self.state_path:
@@ -1103,17 +1719,436 @@ class ClosureSession:
         payload = {
             "status": "success",
             "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "detected_barcodes": self.get_barcodes(),
+            "session_id": self.session_id,
+            "session_status": self.session_status,
+            "created_at_local": self.created_at_local,
+            "updated_at_local": self.updated_at_local,
+            "closed_at_local": self.closed_at_local,
+            "summary_json": str(self.summary_json_path) if self.summary_json_path else None,
+            "last_readout_json": self.last_readout_json,
+            "last_detected_barcodes_json": self.last_detected_barcodes_json,
+            "last_manual_barcodes": self.last_manual_barcodes,
+            "last_closure_status": self.last_closure_status,
+            "shipping_resolution_status": self.shipping_resolution_status,
+            "target_shipping": self.target_shipping,
+            "target_ruta": self.target_ruta,
+            "target_sku": self.target_sku,
+            "target_shipping_expected_units": self.target_shipping_expected_units,
+            "target_shipping_observed_units": self.target_shipping_observed_units,
+            "resolved_from_barcode": self.resolved_from_barcode,
+            "detected_barcodes_all": self.get_barcodes(),
+            "detected_barcodes_unique": self.get_unique_barcodes(),
+            "captures_processed": self.get_captures_processed(),
             "counts": {
-                "detected_barcodes": len(self.detected_barcodes),
+                "detected_barcodes_all": len(self.detected_barcodes_all),
+                "detected_barcodes_unique": len(self.detected_barcodes_unique),
+                "captures_processed": len(self.captures_processed),
             },
         }
         safe_write_json(self.state_path, payload)
 
     def clear(self) -> None:
-        self.detected_barcodes = []
+        now_local = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        self.session_id = f"closure_session_{time.strftime('%Y%m%d_%H%M%S')}"
+        self.session_status = "open"
+        self.created_at_local = now_local
+        self.updated_at_local = now_local
+        self.closed_at_local = None
+
+        self.detected_barcodes_all = []
+        self.detected_barcodes_unique = []
+        self.captures_processed = []
+        self.last_readout_json = None
+        self.last_detected_barcodes_json = None
+        self.last_manual_barcodes = []
+        self.last_closure_status = None
+
+        self.shipping_resolution_status = "pending"
+        self.target_shipping = None
+        self.target_ruta = None
+        self.target_sku = None
+        self.target_shipping_expected_units = 0
+        self.target_shipping_observed_units = 0
+        self.resolved_from_barcode = None
+
         self.save()
 
+
+# def run_closure_iterative(
+#     *,
+#     summary_json: Path,
+#     readout_json: Optional[Path] = None,
+#     detected_barcodes_json: Optional[Path] = None,
+#     manual_barcodes: Optional[str] = None,
+#     session_state_json: Optional[Path] = None,
+#     output_path: Optional[Path] = None,
+#     reset_session: bool = False,
+# ) -> int:
+#     try:
+#         from app.packstructure_closure import (
+#             run_packstructure_closure,
+#             collect_detected_barcodes_from_readout,
+#         )
+#     except Exception as e:
+#         print(f"[ERROR] No pude importar app.packstructure_closure: {e}")
+#         return 2
+
+#     if not summary_json.exists():
+#         print(f"[ERROR] No existe summary_json: {summary_json}")
+#         return 2
+
+#     summary_payload = safe_read_json(summary_json)
+#     if not summary_payload:
+#         print(f"[ERROR] No pude leer summary_json: {summary_json}")
+#         return 2
+    
+#     session = ClosureSession(
+#         summary_payload=summary_payload,
+#         state_path=session_state_json,
+#         summary_json_path=summary_json,
+#     )
+
+#     #session = ClosureSession(summary_payload=summary_payload, state_path=session_state_json)
+
+#     if reset_session:
+#         print("[INFO] Reiniciando sesión iterativa")
+#         session.clear()
+
+#     readout_payload: Optional[Dict[str, Any]] = None
+#     new_barcodes: List[str] = []
+
+#     if readout_json is not None:
+#         if not readout_json.exists():
+#             print(f"[ERROR] No existe readout_json: {readout_json}")
+#             return 2
+
+#         readout_payload = safe_read_json(readout_json)
+#         if not readout_payload:
+#             print(f"[ERROR] No pude leer readout_json: {readout_json}")
+#             return 2
+
+#         readout_barcodes = collect_detected_barcodes_from_readout(readout_payload)
+#         new_barcodes.extend(readout_barcodes)
+
+#     if detected_barcodes_json is not None:
+#         if not detected_barcodes_json.exists():
+#             print(f"[ERROR] No existe detected_barcodes_json: {detected_barcodes_json}")
+#             return 2
+
+#         json_barcodes = _load_detected_barcodes_json(detected_barcodes_json)
+#         if json_barcodes is None:
+#             print("[ERROR] detected_barcodes_json debe ser lista o contener 'detected_barcodes' / 'barcodes' como lista")
+#             return 2
+
+#         new_barcodes.extend(json_barcodes)
+
+#     manual_list = _parse_manual_barcodes(manual_barcodes)
+#     new_barcodes.extend(manual_list)
+
+#     new_barcodes = _dedupe_preserve_order(new_barcodes)
+#     previous_barcodes = session.get_barcodes()
+
+#     session.update(new_barcodes)
+#     session.save()
+
+#     accumulated_barcodes = session.get_barcodes()
+
+#     print("[INFO] Ejecutando closure iterativo")
+#     print(f"[INFO] summary_json: {summary_json}")
+#     if readout_json:
+#         print(f"[INFO] readout_json: {readout_json}")
+#     if detected_barcodes_json:
+#         print(f"[INFO] detected_barcodes_json: {detected_barcodes_json}")
+#     if manual_list:
+#         print(f"[INFO] manual_barcodes: {manual_list}")
+#     if session_state_json:
+#         print(f"[INFO] session_state_json: {session_state_json}")
+
+#     closure_result = run_packstructure_closure(
+#         summary_payload=summary_payload,
+#         detected_barcodes=accumulated_barcodes,
+#         event_context={
+#             "mode": "closure_iterative",
+#             "summary_json": str(summary_json),
+#             "readout_json": str(readout_json) if readout_json else None,
+#             "detected_barcodes_json": str(detected_barcodes_json) if detected_barcodes_json else None,
+#             "manual_barcodes": manual_list,
+#             "session_state_json": str(session_state_json) if session_state_json else None,
+#             "reset_session": reset_session,
+#         },
+#     )
+    
+#     frontend_summary = build_frontend_closure_summary(
+#         closure_result=closure_result,
+#         readout_payload=readout_payload,
+#         detected_barcodes=accumulated_barcodes,
+#     )
+
+#     missing_products = [
+#         p for p in (closure_result.get("products") or [])
+#         if p.get("status") == "missing"
+#     ]
+#     partial_products = [
+#         p for p in (closure_result.get("products") or [])
+#         if p.get("status") == "partial"
+#     ]
+
+#     payload = {
+#         "status": "success" if closure_result.get("status") == "success" else "error",
+#         "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
+#         "mode_app": "closure_iterative",
+#         "summary_json": str(summary_json),
+#         "readout_json": str(readout_json) if readout_json else None,
+#         "detected_barcodes_json": str(detected_barcodes_json) if detected_barcodes_json else None,
+#         "manual_barcodes": manual_list,
+#         "session_state_json": str(session_state_json) if session_state_json else None,
+#         "frontend_summary": frontend_summary,
+#         "session": {
+#             "previous_barcodes": previous_barcodes,
+#             "new_barcodes": new_barcodes,
+#             "accumulated_barcodes": accumulated_barcodes,
+#             "counts": {
+#                 "previous": len(previous_barcodes),
+#                 "new": len(new_barcodes),
+#                 "accumulated": len(accumulated_barcodes),
+#             },
+#         },
+#         "operator_feedback": {
+#             "missing_products_count": len(missing_products),
+#             "partial_products_count": len(partial_products),
+#             "missing_products": [
+#                 {
+#                     "sku": p.get("sku"),
+#                     "descripcion": p.get("descripcion"),
+#                     "expected_units": p.get("expected_units"),
+#                     "observed_units": p.get("observed_units"),
+#                     "status": p.get("status"),
+#                 }
+#                 for p in missing_products
+#             ],
+#             "partial_products": [
+#                 {
+#                     "sku": p.get("sku"),
+#                     "descripcion": p.get("descripcion"),
+#                     "expected_units": p.get("expected_units"),
+#                     "observed_units": p.get("observed_units"),
+#                     "status": p.get("status"),
+#                 }
+#                 for p in partial_products
+#             ],
+#         },
+#         "closure_result": closure_result,
+#     }
+
+#     if output_path is None:
+#         output_dir = Path("data/closure")
+#         output_dir.mkdir(parents=True, exist_ok=True)
+#         stem = summary_json.stem
+#         output_path = output_dir / f"{stem}_closure_iterative_result.json"
+
+#     safe_write_json(output_path, payload)
+
+#     print(f"[OK] Cierre iterativo guardado en: {output_path}")
+#     print(json.dumps(payload, ensure_ascii=False, indent=2))
+#     return 0 if closure_result.get("status") == "success" else 2
+
+# def run_closure_iterative(
+#     *,
+#     summary_json: Path,
+#     readout_json: Optional[Path] = None,
+#     detected_barcodes_json: Optional[Path] = None,
+#     manual_barcodes: Optional[str] = None,
+#     session_state_json: Optional[Path] = None,
+#     output_path: Optional[Path] = None,
+#     reset_session: bool = False,
+# ) -> int:
+#     try:
+#         from app.packstructure_closure import (
+#             run_packstructure_closure,
+#             collect_detected_barcodes_from_readout,
+#         )
+#     except Exception as e:
+#         print(f"[ERROR] No pude importar app.packstructure_closure: {e}")
+#         return 2
+
+#     if not summary_json.exists():
+#         print(f"[ERROR] No existe summary_json: {summary_json}")
+#         return 2
+
+#     summary_payload = safe_read_json(summary_json)
+#     if not summary_payload:
+#         print(f"[ERROR] No pude leer summary_json: {summary_json}")
+#         return 2
+
+#     session = ClosureSession(
+#         summary_payload=summary_payload,
+#         state_path=session_state_json,
+#         summary_json_path=summary_json,
+#     )
+
+#     if reset_session:
+#         print("[INFO] Reiniciando sesión iterativa")
+#         session.clear()
+
+#     readout_payload: Optional[Dict[str, Any]] = None
+#     new_barcodes: List[str] = []
+
+#     if readout_json is not None:
+#         if not readout_json.exists():
+#             print(f"[ERROR] No existe readout_json: {readout_json}")
+#             return 2
+
+#         readout_payload = safe_read_json(readout_json)
+#         if not readout_payload:
+#             print(f"[ERROR] No pude leer readout_json: {readout_json}")
+#             return 2
+
+#         readout_barcodes = collect_detected_barcodes_from_readout(readout_payload)
+#         new_barcodes.extend(readout_barcodes)
+
+#     if detected_barcodes_json is not None:
+#         if not detected_barcodes_json.exists():
+#             print(f"[ERROR] No existe detected_barcodes_json: {detected_barcodes_json}")
+#             return 2
+
+#         json_barcodes = _load_detected_barcodes_json(detected_barcodes_json)
+#         if json_barcodes is None:
+#             print("[ERROR] detected_barcodes_json debe ser lista o contener 'detected_barcodes' / 'barcodes' como lista")
+#             return 2
+
+#         new_barcodes.extend(json_barcodes)
+
+#     manual_list = _parse_manual_barcodes(manual_barcodes)
+#     new_barcodes.extend(manual_list)
+
+#     new_barcodes = _dedupe_preserve_order(new_barcodes)
+#     previous_barcodes = session.get_barcodes()
+
+#     session.update(new_barcodes)
+
+#     # Registrar la evidencia consumida en esta iteración
+#     session.register_capture(
+#         readout_json=readout_json,
+#         detected_barcodes_json=detected_barcodes_json,
+#         manual_barcodes=manual_list,
+#         new_barcodes=new_barcodes,
+#     )
+
+#     accumulated_barcodes = session.get_barcodes()
+
+#     print("[INFO] Ejecutando closure iterativo")
+#     print(f"[INFO] summary_json: {summary_json}")
+#     if readout_json:
+#         print(f"[INFO] readout_json: {readout_json}")
+#     if detected_barcodes_json:
+#         print(f"[INFO] detected_barcodes_json: {detected_barcodes_json}")
+#     if manual_list:
+#         print(f"[INFO] manual_barcodes: {manual_list}")
+#     if session_state_json:
+#         print(f"[INFO] session_state_json: {session_state_json}")
+
+#     closure_result = run_packstructure_closure(
+#         summary_payload=summary_payload,
+#         detected_barcodes=accumulated_barcodes,
+#         event_context={
+#             "mode": "closure_iterative",
+#             "summary_json": str(summary_json),
+#             "readout_json": str(readout_json) if readout_json else None,
+#             "detected_barcodes_json": str(detected_barcodes_json) if detected_barcodes_json else None,
+#             "manual_barcodes": manual_list,
+#             "session_state_json": str(session_state_json) if session_state_json else None,
+#             "reset_session": reset_session,
+#         },
+#     )
+
+#     session.set_closure_status(closure_result.get("closure_status"))
+#     session.save()
+
+#     frontend_summary = build_frontend_closure_summary(
+#         closure_result=closure_result,
+#         readout_payload=readout_payload,
+#         detected_barcodes=accumulated_barcodes,
+#     )
+
+#     missing_products = [
+#         p for p in (closure_result.get("products") or [])
+#         if p.get("status") == "missing"
+#     ]
+#     partial_products = [
+#         p for p in (closure_result.get("products") or [])
+#         if p.get("status") == "partial"
+#     ]
+
+#     payload = {
+#         "status": "success" if closure_result.get("status") == "success" else "error",
+#         "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
+#         "mode_app": "closure_iterative",
+#         "summary_json": str(summary_json),
+#         "readout_json": str(readout_json) if readout_json else None,
+#         "detected_barcodes_json": str(detected_barcodes_json) if detected_barcodes_json else None,
+#         "manual_barcodes": manual_list,
+#         "session_state_json": str(session_state_json) if session_state_json else None,
+#         "frontend_summary": frontend_summary,
+#         "session": {
+#             "session_id": session.session_id,
+#             "session_status": session.session_status,
+#             "created_at_local": session.created_at_local,
+#             "updated_at_local": session.updated_at_local,
+#             "closed_at_local": session.closed_at_local,
+#             "last_closure_status": session.last_closure_status,
+#             "last_readout_json": session.last_readout_json,
+#             "last_detected_barcodes_json": session.last_detected_barcodes_json,
+#             "last_manual_barcodes": session.last_manual_barcodes,
+#             "captures_processed": session.get_captures_processed(),
+#             "previous_barcodes": previous_barcodes,
+#             "new_barcodes": new_barcodes,
+#             "accumulated_barcodes": accumulated_barcodes,
+#             "counts": {
+#                 "previous": len(previous_barcodes),
+#                 "new": len(new_barcodes),
+#                 "accumulated": len(accumulated_barcodes),
+#                 "captures_processed": len(session.get_captures_processed()),
+#             },
+#         },
+#         "operator_feedback": {
+#             "missing_products_count": len(missing_products),
+#             "partial_products_count": len(partial_products),
+#             "missing_products": [
+#                 {
+#                     "sku": p.get("sku"),
+#                     "descripcion": p.get("descripcion"),
+#                     "expected_units": p.get("expected_units"),
+#                     "observed_units": p.get("observed_units"),
+#                     "status": p.get("status"),
+#                 }
+#                 for p in missing_products
+#             ],
+#             "partial_products": [
+#                 {
+#                     "sku": p.get("sku"),
+#                     "descripcion": p.get("descripcion"),
+#                     "expected_units": p.get("expected_units"),
+#                     "observed_units": p.get("observed_units"),
+#                     "status": p.get("status"),
+#                 }
+#                 for p in partial_products
+#             ],
+#         },
+#         "closure_result": closure_result,
+#     }
+
+#     if output_path is None:
+#         output_dir = Path("data/closure")
+#         output_dir.mkdir(parents=True, exist_ok=True)
+#         stem = summary_json.stem
+#         output_path = output_dir / f"{stem}_closure_iterative_result.json"
+
+#     safe_write_json(output_path, payload)
+
+#     print(f"[OK] Cierre iterativo guardado en: {output_path}")
+#     print(json.dumps(payload, ensure_ascii=False, indent=2))
+#     return 0 if closure_result.get("status") == "success" else 2
 
 def run_closure_iterative(
     *,
@@ -1143,7 +2178,11 @@ def run_closure_iterative(
         print(f"[ERROR] No pude leer summary_json: {summary_json}")
         return 2
 
-    session = ClosureSession(summary_payload=summary_payload, state_path=session_state_json)
+    session = ClosureSession(
+        summary_payload=summary_payload,
+        state_path=session_state_json,
+        summary_json_path=summary_json,
+    )
 
     if reset_session:
         print("[INFO] Reiniciando sesión iterativa")
@@ -1180,13 +2219,22 @@ def run_closure_iterative(
     manual_list = _parse_manual_barcodes(manual_barcodes)
     new_barcodes.extend(manual_list)
 
-    new_barcodes = _dedupe_preserve_order(new_barcodes)
-    previous_barcodes = session.get_barcodes()
+    # OJO: acá ya NO deduplicamos
+    new_barcodes = [_norm_barcode(x) for x in new_barcodes if _norm_barcode(x)]
+    previous_barcodes_all = session.get_barcodes()
+    previous_barcodes_unique = session.get_unique_barcodes()
 
     session.update(new_barcodes)
-    session.save()
 
-    accumulated_barcodes = session.get_barcodes()
+    session.register_capture(
+        readout_json=readout_json,
+        detected_barcodes_json=detected_barcodes_json,
+        manual_barcodes=manual_list,
+        new_barcodes=new_barcodes,
+    )
+
+    accumulated_barcodes_all = session.get_barcodes()
+    accumulated_barcodes_unique = session.get_unique_barcodes()
 
     print("[INFO] Ejecutando closure iterativo")
     print(f"[INFO] summary_json: {summary_json}")
@@ -1199,9 +2247,45 @@ def run_closure_iterative(
     if session_state_json:
         print(f"[INFO] session_state_json: {session_state_json}")
 
+    # 1) Resolver shipping objetivo
+    shipping_resolution = _resolve_target_shipping_from_barcodes(
+        summary_payload=summary_payload,
+        detected_barcodes_all=accumulated_barcodes_all,
+    )
+
+    # Si la sesión ya traía shipping resuelto, lo respetamos
+    if session.target_shipping and session.shipping_resolution_status == "resolved_unique":
+        shipping_resolution = {
+            "status": "resolved_unique",
+            "target_shipping": session.target_shipping,
+            "target_ruta": session.target_ruta,
+            "target_sku": session.target_sku,
+            "target_shipping_expected_units": session.target_shipping_expected_units,
+            "resolved_from_barcode": session.resolved_from_barcode,
+            "resolved_candidates": [],
+        }
+
+    # 2) Calcular observado real para esa orden
+    target_observation = _compute_observed_units_for_target_shipping(
+        summary_payload=summary_payload,
+        detected_barcodes_all=accumulated_barcodes_all,
+        target_shipping=shipping_resolution.get("target_shipping"),
+    )
+
+    session.set_target_shipping_resolution(
+        status=shipping_resolution.get("status") or "pending",
+        target_shipping=shipping_resolution.get("target_shipping"),
+        target_ruta=shipping_resolution.get("target_ruta"),
+        target_sku=shipping_resolution.get("target_sku"),
+        target_shipping_expected_units=int(shipping_resolution.get("target_shipping_expected_units") or 0),
+        target_shipping_observed_units=int(target_observation.get("observed_units") or 0),
+        resolved_from_barcode=shipping_resolution.get("resolved_from_barcode"),
+    )
+
+    # 3) Mantener closure_result actual como apoyo de comparación SKU-level
     closure_result = run_packstructure_closure(
         summary_payload=summary_payload,
-        detected_barcodes=accumulated_barcodes,
+        detected_barcodes=accumulated_barcodes_all,
         event_context={
             "mode": "closure_iterative",
             "summary_json": str(summary_json),
@@ -1210,13 +2294,36 @@ def run_closure_iterative(
             "manual_barcodes": manual_list,
             "session_state_json": str(session_state_json) if session_state_json else None,
             "reset_session": reset_session,
+            "target_shipping": session.target_shipping,
         },
     )
-    
+
+    # 4) Criterio real de cierre de sesión
+    target_shipping_complete = (
+        session.shipping_resolution_status == "resolved_unique"
+        and session.target_shipping is not None
+        and session.target_shipping_expected_units > 0
+        and session.target_shipping_observed_units >= session.target_shipping_expected_units
+    )
+
+    if target_shipping_complete:
+        session.mark_closed()
+
+    effective_closure_status = closure_result.get("closure_status")
+    if target_shipping_complete:
+        effective_closure_status = "target_shipping_complete"
+    elif session.shipping_resolution_status == "ambiguous":
+        effective_closure_status = "target_shipping_ambiguous"
+    elif session.shipping_resolution_status == "not_found":
+        effective_closure_status = "target_shipping_not_found"
+
+    session.set_closure_status(effective_closure_status)
+    session.save()
+
     frontend_summary = build_frontend_closure_summary(
         closure_result=closure_result,
         readout_payload=readout_payload,
-        detected_barcodes=accumulated_barcodes,
+        detected_barcodes=accumulated_barcodes_all,
     )
 
     missing_products = [
@@ -1239,15 +2346,41 @@ def run_closure_iterative(
         "session_state_json": str(session_state_json) if session_state_json else None,
         "frontend_summary": frontend_summary,
         "session": {
-            "previous_barcodes": previous_barcodes,
+            "session_id": session.session_id,
+            "session_status": session.session_status,
+            "created_at_local": session.created_at_local,
+            "updated_at_local": session.updated_at_local,
+            "closed_at_local": session.closed_at_local,
+            "last_closure_status": session.last_closure_status,
+            "last_readout_json": session.last_readout_json,
+            "last_detected_barcodes_json": session.last_detected_barcodes_json,
+            "last_manual_barcodes": session.last_manual_barcodes,
+            "captures_processed": session.get_captures_processed(),
+            "shipping_resolution_status": session.shipping_resolution_status,
+            "target_shipping": session.target_shipping,
+            "target_ruta": session.target_ruta,
+            "target_sku": session.target_sku,
+            "target_shipping_expected_units": session.target_shipping_expected_units,
+            "target_shipping_observed_units": session.target_shipping_observed_units,
+            "resolved_from_barcode": session.resolved_from_barcode,
+            "previous_barcodes_all": previous_barcodes_all,
+            "previous_barcodes_unique": previous_barcodes_unique,
             "new_barcodes": new_barcodes,
-            "accumulated_barcodes": accumulated_barcodes,
+            "accumulated_barcodes_all": accumulated_barcodes_all,
+            "accumulated_barcodes_unique": accumulated_barcodes_unique,
             "counts": {
-                "previous": len(previous_barcodes),
+                "previous_all": len(previous_barcodes_all),
+                "previous_unique": len(previous_barcodes_unique),
                 "new": len(new_barcodes),
-                "accumulated": len(accumulated_barcodes),
+                "accumulated_all": len(accumulated_barcodes_all),
+                "accumulated_unique": len(accumulated_barcodes_unique),
+                "captures_processed": len(session.get_captures_processed()),
             },
         },
+        "target_shipping_resolution": shipping_resolution,
+        "target_shipping_observation": target_observation,
+        "target_shipping_complete": target_shipping_complete,
+        "effective_closure_status": effective_closure_status,
         "operator_feedback": {
             "missing_products_count": len(missing_products),
             "partial_products_count": len(partial_products),
@@ -1399,10 +2532,8 @@ def main() -> None:
         raise SystemExit(rc)
 
     if args.mode_app == "closure_iterative":
-        if not args.summary_json:
-            print("[ERROR] Para --mode_app closure_iterative debes indicar --summary_json")
-            raise SystemExit(2)
-
+        summary_json = Path(args.summary_json) if args.summary_json else DEFAULT_CLOSURE_SUMMARY_JSON
+        
         if (
             not args.readout_json
             and not args.detected_barcodes_json
@@ -1411,14 +2542,14 @@ def main() -> None:
         ):
             print("[ERROR] Para --mode_app closure_iterative debes indicar --readout_json, --detected_barcodes_json, --manual_barcodes o --reset_session")
             raise SystemExit(2)
-
+        
         rc = run_closure_iterative(
-            summary_json=Path(args.summary_json),
+            summary_json=summary_json,
             readout_json=Path(args.readout_json) if args.readout_json else None,
             detected_barcodes_json=Path(args.detected_barcodes_json) if args.detected_barcodes_json else None,
             manual_barcodes=args.manual_barcodes,
             session_state_json=Path(args.session_state_json) if args.session_state_json else None,
-            output_path=Path(args.closure_output) if args.closure_output else None,
+            output_path=Path(args.closure_output) if args.closure_output else DEFAULT_CLOSURE_ITERATIVE_OUTPUT_JSON,
             reset_session=args.reset_session,
         )
         raise SystemExit(rc)

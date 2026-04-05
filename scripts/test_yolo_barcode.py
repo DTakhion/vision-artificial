@@ -223,28 +223,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# imagen especifica; 
-# python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png
-
-# visualizacion
-# python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png --save_vis
-
-# con ajuste de umbrales
-# python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png \
-#   --conf 0.10 \
-#   --pad_ratio 0.25 \ 
-#   --decoder_mode collect_plus \
-#   --decoder_budget 5000 \
-#   --save_vis \
-#   --save_crops
-
-# python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png \
-#   --conf 0.10 \
-#   --pad_ratio 0.80 \
-#   --decoder_mode collect_plus \
-#   --decoder_budget 5000 \
-#   --save_vis \
-#   --save_crops
-

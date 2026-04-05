@@ -100,3 +100,49 @@ python scripts/capture_opencv.py \
   --roi 80 80 1700 900 \
   --every 0
 ```
+
+# otras herramientas; 
+
+## utils/vision_readout_hybrid.py con filtro de formatos, 
+
+``` bash
+python -m utils.vision_readout_hybrid \
+  data/tests_picking/capture_barcode_test.png \
+  --save-vis \
+  --vis-out results/capture_barcode_test_hybrid.png \
+  --save-json \
+  --json-out results/capture_barcode_test_hybrid.json
+```
+
+## utils/vision_readout_hybrid.py con formatos adicionales, 
+``` bash
+python -m utils.vision_readout_hybrid \
+  data/tests_picking/capture_barcode_test.png \
+  --allowed-formats EAN_13 CODE_128 ITF CODE_39 \
+  --save-json
+```
+
+## scripts/test_yolo_barcode.py
+
+# imagen especifica; 
+python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png
+
+# visualizacion
+python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png --save_vis
+
+# con ajuste de umbrales
+python -m scripts.test_yolo_barcode data/captures/opencv/frames_20260402_102513/events/event_000001/frames/frame_03.jpg \
+--conf 0.10 \
+--pad_ratio 0.25 \
+--decoder_mode collect_plus \
+--decoder_budget 5000 \
+--save_vis \
+--save_crops
+
+python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png \
+  --conf 0.10 \
+  --pad_ratio 0.80 \
+  --decoder_mode collect_plus \
+  --decoder_budget 5000 \
+  --save_vis \
+  --save_crops

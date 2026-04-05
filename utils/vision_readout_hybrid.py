@@ -1,5 +1,4 @@
 # utils/vision_readout_hybrid.py
-
 from __future__ import annotations
 
 import argparse
@@ -17,6 +16,12 @@ from utils.vision_barcode_yolo import (
 )
 from utils.vision_barcode import decode_barcode_1d
 from utils.vision_barcode_dynamsoft import decode_barcode_dynamsoft
+
+
+# ------------------------------------------------------------------
+# Configuración por defecto
+# ------------------------------------------------------------------
+DEFAULT_ALLOWED_FORMATS = {"EAN_13", "CODE_128", "ITF"}
 
 
 # ------------------------------------------------------------------
@@ -99,6 +104,36 @@ def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         item.pop("_score", None)
 
     return out
+
+
+def _normalize_format_name(fmt: Any) -> str:
+    return str(fmt or "").strip().upper()
+
+
+def _filter_items_by_allowed_formats(
+    items: List[Dict[str, Any]],
+    allowed_formats: set[str] | None,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Filtra items por formatos permitidos.
+    Si allowed_formats es None o vacío, no filtra.
+    """
+    if not allowed_formats:
+        return items, []
+
+    allowed_norm = {_normalize_format_name(x) for x in allowed_formats}
+
+    kept: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+
+    for item in items:
+        fmt = _normalize_format_name(item.get("format"))
+        if fmt in allowed_norm:
+            kept.append(item)
+        else:
+            rejected.append(item)
+
+    return kept, rejected
 
 
 def _normalize_dynamsoft_item(
@@ -189,6 +224,7 @@ def read_barcodes_hybrid(
     use_yolo_full_pipeline: bool = True,
     use_dynamsoft_full_image: bool = True,
     use_dynamsoft_on_yolo_rois: bool = True,
+    allowed_formats: set[str] | None = None,
 ) -> Dict[str, Any]:
     if img_bgr is None or not isinstance(img_bgr, np.ndarray) or img_bgr.size == 0:
         return {
@@ -197,12 +233,17 @@ def read_barcodes_hybrid(
             "total": 0,
         }
 
+    if allowed_formats is None:
+        allowed_formats = set(DEFAULT_ALLOWED_FORMATS)
+
     collected_items: List[Dict[str, Any]] = []
     debug: Dict[str, Any] = {
         "dynamsoft_full_image": None,
         "yolo_rois": [],
         "yolo_pipeline": None,
         "dynamsoft_yolo_rois": [],
+        "allowed_formats": sorted(list(allowed_formats)) if allowed_formats else [],
+        "filtered_out": [],
     }
 
     # --------------------------------------------------------------
@@ -314,7 +355,13 @@ def read_barcodes_hybrid(
 
             debug["dynamsoft_yolo_rois"].append(roi_debug)
 
-    final_items = _dedupe_items(collected_items)
+    filtered_items, filtered_out = _filter_items_by_allowed_formats(
+        collected_items,
+        allowed_formats=allowed_formats,
+    )
+    debug["filtered_out"] = filtered_out
+
+    final_items = _dedupe_items(filtered_items)
 
     return {
         "status": "success" if final_items else "not_found",
@@ -401,6 +448,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-dynamsoft-full", action="store_true")
     parser.add_argument("--no-dynamsoft-rois", action="store_true")
 
+    parser.add_argument(
+        "--allowed-formats",
+        nargs="+",
+        default=sorted(list(DEFAULT_ALLOWED_FORMATS)),
+        help="Formatos permitidos. Ej: --allowed-formats EAN_13 CODE_128 ITF",
+    )
+
     parser.add_argument("--json", action="store_true", help="Imprime JSON completo")
     parser.add_argument("--save-json", action="store_true", help="Guarda JSON")
     parser.add_argument("--json-out", default=None, help="Ruta salida JSON")
@@ -429,6 +483,8 @@ def main() -> int:
         if img is None:
             raise RuntimeError(f"No se pudo cargar la imagen: {args.image_path}")
 
+        allowed_formats = {_normalize_format_name(x) for x in (args.allowed_formats or [])}
+
         result = read_barcodes_hybrid(
             img_bgr=img,
             env_file=args.env_file,
@@ -443,6 +499,7 @@ def main() -> int:
             use_yolo_full_pipeline=not args.no_yolo_pipeline,
             use_dynamsoft_full_image=not args.no_dynamsoft_full,
             use_dynamsoft_on_yolo_rois=not args.no_dynamsoft_rois,
+            allowed_formats=allowed_formats,
         )
 
         if args.json:
@@ -487,10 +544,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-# python -m utils.vision_readout_hybrid \
-#   data/tests_picking/capture_barcode_test.png \
-#   --save-vis \
-#   --vis-out results/capture_barcode_test_hybrid.png \
-#   --save-json \
-#   --json-out results/capture_barcode_test_hybrid.json

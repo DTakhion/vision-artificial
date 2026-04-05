@@ -50,14 +50,20 @@ htmlcov/
 # ----------------------------
 # Data
 # ----------------------------
-data/
-!data/fillrate/
-!data/fillrate/latest/
-!data/fillrate/latest/fillrate_latest.xlsx
+# Ignorar todo data
+data/*
+
+# ---- Permitir estructura necesaria ----
+!data/picking/
+!data/picking/summary_fillRate_packStructure/
+!data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json
 
 !data/tests_picking/
 !data/tests_picking/PackStructure.xlsx
-!data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json
+
+!data/fillrate/
+!data/fillrate/latest/
+!data/fillrate/latest/fillrate_latest.xlsx
 
 datasets/
 captures/
