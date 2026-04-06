@@ -146,3 +146,6 @@ python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png 
   --decoder_budget 5000 \
   --save_vis \
   --save_crops
+
+# Levantar Backend; 
+## uvicorn backend.main:app --reload

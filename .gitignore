@@ -46,6 +46,8 @@ htmlcov/
 # VS Code
 # ----------------------------
 .vscode/
+* copy.py
+* 2.py
 
 # ----------------------------
 # Data
@@ -64,6 +66,8 @@ data/*
 !data/fillrate/
 !data/fillrate/latest/
 !data/fillrate/latest/fillrate_latest.xlsx
+
+data/fillrate/archive
 
 datasets/
 captures/

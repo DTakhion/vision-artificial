@@ -1,4 +1,5 @@
 # # scripts/capture_opencv.py
+
 # from __future__ import annotations
 
 # import argparse
@@ -233,8 +234,9 @@
 #     interval_s: float,
 # ) -> Tuple[List[Dict[str, Any]], int]:
 #     """
-#     Mantenida solo por compatibilidad / referencia.
-#     En el flujo principal ya no se usa de forma bloqueante.
+#     ## MANTENIDO SOLO COMO REFERENCIA
+#     ## Este helper pertenece al flujo automático anterior.
+#     ## No se usa en el MVP manual controlado.
 #     """
 #     records: List[Dict[str, Any]] = []
 
@@ -279,7 +281,7 @@
 #     ap.add_argument("--fps", type=int, default=30)
 #     ap.add_argument("--out_dir", type=str, default="data/captures/opencv")
 #     ap.add_argument("--save_video", action="store_true")
-#     ap.add_argument("--every", type=int, default=15, help="Guarda 1 frame cada N frames (0 desactiva)")
+#     ap.add_argument("--every", type=int, default=0, help="Guarda 1 frame cada N frames (0 desactiva)")
 #     ap.add_argument("--no_display", action="store_true", help="Headless. Cortar con Ctrl+C.")
 #     ap.add_argument("--fps_window", type=int, default=30)
 
@@ -291,7 +293,7 @@
 #         nargs=4,
 #         metavar=("X", "Y", "W", "H"),
 #         default=None,
-#         help="ROI (x y w h) para el mesón / gesto. Ej: --roi 240 180 800 360",
+#         help="ROI (x y w h). Ej: --roi 240 180 800 360",
 #     )
 
 #     # Manual
@@ -308,7 +310,11 @@
 #         help="Tamaño del buffer reciente para construir burst manual (default=5).",
 #     )
 
-#     # Auto-eventos
+#     ## ==========================================================
+#     ## AUTO-EVENTOS (MANTENIDOS SOLO COMO REFERENCIA FUTURA)
+#     ## Para el MVP del lunes NO se usarán.
+#     ## Dejamos los argumentos para no romper compatibilidad.
+#     ## ==========================================================
 #     ap.add_argument("--auto_events", action="store_true", help="Disparo automático de eventos")
 #     ap.add_argument(
 #         "--auto_method",
@@ -335,13 +341,11 @@
 #         help="Intervalo entre frames en la captura temporal automática.",
 #     )
 
-#     # Auto por MOTION
 #     ap.add_argument("--enter_thr", type=float, default=0.08, help="motion_ratio para re-armar (0-1)")
 #     ap.add_argument("--stable_thr", type=float, default=0.01, help="motion_ratio para considerar estable (0-1)")
 #     ap.add_argument("--stable_frames", type=int, default=25, help="frames estables para disparar")
 #     ap.add_argument("--cooldown_s", type=float, default=2.0, help="cooldown tras disparar")
 
-#     # Auto por BG
 #     ap.add_argument("--bg_warmup", type=int, default=45, help="frames para aprender fondo antes de disparar")
 #     ap.add_argument("--min_fg_ratio", type=float, default=0.02, help="ratio de foreground para 'objeto presente'")
 #     ap.add_argument("--min_contour_area", type=int, default=2500, help="área mínima de contorno para 'objeto presente'")
@@ -388,14 +392,18 @@
 #     if args.events:
 #         events_dir.mkdir(parents=True, exist_ok=True)
 #         print(f"[INFO] Eventos habilitados: {events_dir}")
-#         if args.auto_events:
-#             print(f"[INFO] Auto-eventos ON | method={args.auto_method} | cooldown_s={args.cooldown_s}")
-#             if args.auto_use_window_capture:
-#                 print(
-#                     f"[INFO] Auto-window ON | duration={args.auto_window_s:.1f}s | interval={args.auto_interval_s:.2f}s"
-#                 )
-#             if roi is None:
-#                 print("[WARN] auto_events sin ROI: funcionará, pero para PoC industrial se recomienda ROI en el mesón.")
+
+#         ## ======================================================
+#         ## AUTO-EVENTOS DESACTIVADOS EN EL MVP
+#         ## ======================================================
+#         ## if args.auto_events:
+#         ##     print(f"[INFO] Auto-eventos ON | method={args.auto_method} | cooldown_s={args.cooldown_s}")
+#         ##     if args.auto_use_window_capture:
+#         ##         print(
+#         ##             f"[INFO] Auto-window ON | duration={args.auto_window_s:.1f}s | interval={args.auto_interval_s:.2f}s"
+#         ##         )
+#         ##     if roi is None:
+#         ##         print("[WARN] auto_events sin ROI: funcionará, pero para PoC industrial se recomienda ROI en el mesón.")
 
 #     session_path = frame_dir / "session.json"
 #     session: Dict[str, Any] = {
@@ -421,14 +429,14 @@
 #             "video_path": None,
 #             "manual_burst": int(max(1, args.manual_burst)),
 #             "manual_buffer": int(max(3, args.manual_buffer)),
-#             "auto_use_window_capture": bool(args.auto_use_window_capture),
+#             "auto_use_window_capture": False,
 #             "auto_window_s": float(args.auto_window_s),
 #             "auto_interval_s": float(args.auto_interval_s),
 #         },
 #         "events": {
 #             "enabled": bool(args.events),
-#             "auto_enabled": bool(args.events and args.auto_events),
-#             "auto_method": (args.auto_method if (args.events and args.auto_events) else None),
+#             "auto_enabled": False,
+#             "auto_method": None,
 #             "roi": ({"x": roi[0], "y": roi[1], "w": roi[2], "h": roi[3]} if roi else None),
 #             "counts": {"total": 0, "manual": 0, "auto": 0},
 #         },
@@ -440,6 +448,7 @@
 #             "frames_saved": 0,
 #             "manual_saved": 0,
 #         },
+#         "last_manual_event": None,
 #         "end_time_local": None,
 #         "end_time_epoch": None,
 #         "status": "running",
@@ -461,9 +470,9 @@
 
 #     if not args.no_display:
 #         if args.events:
-#             print("[INFO] Controles: 'q' salir | 's' frame manual | 'e' EVENTO manual")
+#             print("[INFO] Controles MVP: 'q' salir | 's' frame manual | 'e' CAPTURAR evento manual y cerrar")
 #         else:
-#             print("[INFO] Controles: 'q' salir | 's' frame manual")
+#             print("[INFO] Controles MVP: 'q' salir | 's' frame manual")
 #     else:
 #         print("[INFO] Headless: Ctrl+C para salir")
 
@@ -478,6 +487,9 @@
 
 #     event_id = 0
 
+#     ## ==========================================================
+#     ## ESTADOS DEL FLUJO AUTOMÁTICO (MANTENIDOS, PERO NO USADOS)
+#     ## ==========================================================
 #     cooldown_until = 0.0
 #     armed = True
 
@@ -491,17 +503,20 @@
 #     last_fg_ratio: Optional[float] = None
 #     last_max_area: Optional[int] = None
 
-#     if args.events and args.auto_events and args.auto_method == "bg":
-#         bg_sub = cv2.createBackgroundSubtractorMOG2(
-#             history=int(args.bg_history),
-#             varThreshold=int(args.bg_var_threshold),
-#             detectShadows=bool(args.bg_detect_shadows),
-#         )
+#     ## if args.events and args.auto_events and args.auto_method == "bg":
+#     ##     bg_sub = cv2.createBackgroundSubtractorMOG2(
+#     ##         history=int(args.bg_history),
+#     ##         varThreshold=int(args.bg_var_threshold),
+#     ##         detectShadows=bool(args.bg_detect_shadows),
+#     ##     )
 
 #     recent_buffer_size = max(3, int(args.manual_buffer))
 #     recent_frames: Deque[Dict[str, Any]] = deque(maxlen=recent_buffer_size)
 
-#     # Estado para auto-window no bloqueante
+#     ## ==========================================================
+#     ## ESTADO PARA AUTO-WINDOW NO BLOQUEANTE
+#     ## MANTENIDO SOLO COMO REFERENCIA FUTURA
+#     ## ==========================================================
 #     pending_auto_capture = False
 #     pending_event_id: Optional[int] = None
 #     pending_auto_metrics: Optional[Dict[str, Any]] = None
@@ -510,6 +525,11 @@
 #     pending_records: List[Dict[str, Any]] = []
 #     pending_start_t = 0.0
 #     pending_next_capture_t = 0.0
+
+#     captured_event_dir: Optional[str] = None
+#     captured_frame_path: Optional[str] = None
+#     captured_roi_path: Optional[str] = None
+#     captured_event_json_path: Optional[str] = None
 
 #     try:
 #         while True:
@@ -539,178 +559,109 @@
 #                 win_start_t = time.time()
 #                 win_start_idx = idx
 
-#             auto_trigger = False
-#             auto_metrics = None
+#             ## ======================================================
+#             ## BLOQUE AUTOMÁTICO DESACTIVADO PARA MVP
+#             ## ======================================================
+#             ## auto_trigger = False
+#             ## auto_metrics = None
+#             ##
+#             ## if args.events and args.auto_events:
+#             ##     now = time.time()
+#             ##     if now < cooldown_until:
+#             ##         armed = False
+#             ##         stable_count = 0
+#             ##         present_count = 0
+#             ##     else:
+#             ##         roi_img = crop_roi(frame, roi) if roi else frame
+#             ##         if roi_img is not None and roi_img.size > 0:
+#             ##             if args.auto_method == "motion":
+#             ##                 curr = to_gray_blur(roi_img)
+#             ##                 if prev_gray is not None:
+#             ##                     mr = motion_ratio(prev_gray, curr)
+#             ##                     last_motion = mr
+#             ##
+#             ##                     if mr > args.enter_thr:
+#             ##                         armed = True
+#             ##                         stable_count = 0
+#             ##
+#             ##                     if armed and mr < args.stable_thr:
+#             ##                         stable_count += 1
+#             ##                     else:
+#             ##                         stable_count = 0
+#             ##
+#             ##                     if armed and stable_count >= args.stable_frames:
+#             ##                         auto_trigger = True
+#             ##                         auto_metrics = {
+#             ##                             "method": "motion",
+#             ##                             "motion_ratio": float(mr),
+#             ##                             "enter_thr": float(args.enter_thr),
+#             ##                             "stable_thr": float(args.stable_thr),
+#             ##                             "stable_frames": int(args.stable_frames),
+#             ##                         }
+#             ##                         armed = False
+#             ##                         stable_count = 0
+#             ##                         cooldown_until = time.time() + float(args.cooldown_s)
+#             ##
+#             ##                 prev_gray = curr
+#             ##
+#             ##             else:
+#             ##                 assert bg_sub is not None
+#             ##
+#             ##                 fg = bg_sub.apply(roi_img)
+#             ##                 if bg_warmup_left > 0:
+#             ##                     bg_warmup_left -= 1
+#             ##                     present_count = 0
+#             ##                     armed = True
+#             ##                 else:
+#             ##                     _, fg = cv2.threshold(fg, 200, 255, cv2.THRESH_BINARY)
+#             ##                     fg = cv2.medianBlur(fg, 5)
+#             ##                     fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, None, iterations=1)
+#             ##                     fg = cv2.morphologyEx(fg, cv2.MORPH_DILATE, None, iterations=1)
+#             ##
+#             ##                     fg_pixels = cv2.countNonZero(fg)
+#             ##                     total = fg.shape[0] * fg.shape[1]
+#             ##                     fg_ratio = fg_pixels / max(1, total)
+#             ##                     last_fg_ratio = fg_ratio
+#             ##
+#             ##                     contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+#             ##                     max_area = 0
+#             ##                     for c in contours:
+#             ##                         a = int(cv2.contourArea(c))
+#             ##                         if a > max_area:
+#             ##                             max_area = a
+#             ##                     last_max_area = max_area
+#             ##
+#             ##                     present = (fg_ratio >= float(args.min_fg_ratio)) or (max_area >= int(args.min_contour_area))
+#             ##
+#             ##                     if present:
+#             ##                         present_count += 1
+#             ##                     else:
+#             ##                         present_count = 0
+#             ##                         armed = True
+#             ##
+#             ##                     if armed and present_count >= int(args.present_frames):
+#             ##                         auto_trigger = True
+#             ##                         auto_metrics = {
+#             ##                             "method": "bg",
+#             ##                             "fg_ratio": float(fg_ratio),
+#             ##                             "max_contour_area": int(max_area),
+#             ##                             "min_fg_ratio": float(args.min_fg_ratio),
+#             ##                             "min_contour_area": int(args.min_contour_area),
+#             ##                             "present_frames": int(args.present_frames),
+#             ##                             "bg_warmup": int(args.bg_warmup),
+#             ##                             "bg_history": int(args.bg_history),
+#             ##                             "bg_var_threshold": int(args.bg_var_threshold),
+#             ##                             "detect_shadows": bool(args.bg_detect_shadows),
+#             ##                         }
+#             ##                         armed = False
+#             ##                         present_count = 0
+#             ##                         cooldown_until = time.time() + float(args.cooldown_s)
 
-#             if args.events and args.auto_events:
-#                 now = time.time()
-#                 if now < cooldown_until:
-#                     armed = False
-#                     stable_count = 0
-#                     present_count = 0
-#                 else:
-#                     roi_img = crop_roi(frame, roi) if roi else frame
-#                     if roi_img is not None and roi_img.size > 0:
-#                         if args.auto_method == "motion":
-#                             curr = to_gray_blur(roi_img)
-#                             if prev_gray is not None:
-#                                 mr = motion_ratio(prev_gray, curr)
-#                                 last_motion = mr
-
-#                                 if mr > args.enter_thr:
-#                                     armed = True
-#                                     stable_count = 0
-
-#                                 if armed and mr < args.stable_thr:
-#                                     stable_count += 1
-#                                 else:
-#                                     stable_count = 0
-
-#                                 if armed and stable_count >= args.stable_frames:
-#                                     auto_trigger = True
-#                                     auto_metrics = {
-#                                         "method": "motion",
-#                                         "motion_ratio": float(mr),
-#                                         "enter_thr": float(args.enter_thr),
-#                                         "stable_thr": float(args.stable_thr),
-#                                         "stable_frames": int(args.stable_frames),
-#                                     }
-#                                     armed = False
-#                                     stable_count = 0
-#                                     cooldown_until = time.time() + float(args.cooldown_s)
-
-#                             prev_gray = curr
-
-#                         else:
-#                             assert bg_sub is not None
-
-#                             fg = bg_sub.apply(roi_img)
-#                             if bg_warmup_left > 0:
-#                                 bg_warmup_left -= 1
-#                                 present_count = 0
-#                                 armed = True
-#                             else:
-#                                 _, fg = cv2.threshold(fg, 200, 255, cv2.THRESH_BINARY)
-#                                 fg = cv2.medianBlur(fg, 5)
-#                                 fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, None, iterations=1)
-#                                 fg = cv2.morphologyEx(fg, cv2.MORPH_DILATE, None, iterations=1)
-
-#                                 fg_pixels = cv2.countNonZero(fg)
-#                                 total = fg.shape[0] * fg.shape[1]
-#                                 fg_ratio = fg_pixels / max(1, total)
-#                                 last_fg_ratio = fg_ratio
-
-#                                 contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-#                                 max_area = 0
-#                                 for c in contours:
-#                                     a = int(cv2.contourArea(c))
-#                                     if a > max_area:
-#                                         max_area = a
-#                                 last_max_area = max_area
-
-#                                 present = (fg_ratio >= float(args.min_fg_ratio)) or (max_area >= int(args.min_contour_area))
-
-#                                 if present:
-#                                     present_count += 1
-#                                 else:
-#                                     present_count = 0
-#                                     armed = True
-
-#                                 if armed and present_count >= int(args.present_frames):
-#                                     auto_trigger = True
-#                                     auto_metrics = {
-#                                         "method": "bg",
-#                                         "fg_ratio": float(fg_ratio),
-#                                         "max_contour_area": int(max_area),
-#                                         "min_fg_ratio": float(args.min_fg_ratio),
-#                                         "min_contour_area": int(args.min_contour_area),
-#                                         "present_frames": int(args.present_frames),
-#                                         "bg_warmup": int(args.bg_warmup),
-#                                         "bg_history": int(args.bg_history),
-#                                         "bg_var_threshold": int(args.bg_var_threshold),
-#                                         "detect_shadows": bool(args.bg_detect_shadows),
-#                                     }
-#                                     armed = False
-#                                     present_count = 0
-#                                     cooldown_until = time.time() + float(args.cooldown_s)
-
-#             if auto_trigger and args.events:
-#                 event_id += 1
-
-#                 if args.auto_use_window_capture:
-#                     pending_auto_capture = True
-#                     pending_event_id = event_id
-#                     pending_auto_metrics = auto_metrics
-#                     pending_trigger_idx = idx
-#                     pending_trigger_frame = frame.copy()
-#                     pending_records = []
-#                     pending_start_t = time.time()
-#                     pending_next_capture_t = pending_start_t
-#                     print(f"[AUTO] Trigger #{event_id} iniciado | window={args.auto_window_s:.1f}s")
-#                 else:
-#                     ev_dir = save_event(
-#                         frame_dir=frame_dir,
-#                         events_dir=events_dir,
-#                         event_id=event_id,
-#                         frame=frame,
-#                         idx=idx,
-#                         roi=roi,
-#                         trigger="auto",
-#                         auto_metrics=auto_metrics,
-#                         burst_records=None,
-#                     )
-#                     session["events"]["counts"]["total"] += 1
-#                     session["events"]["counts"]["auto"] += 1
-#                     safe_write_json(session_path, session)
-#                     print(f"[AUTO] Evento #{event_id} guardado: {ev_dir}")
-
-#             if pending_auto_capture:
-#                 now_cap = time.time()
-
-#                 if now_cap >= pending_next_capture_t:
-#                     pending_records.append(
-#                         frame_record(
-#                             idx=idx,
-#                             frame=frame,
-#                             epoch_ms=int(time.time() * 1000),
-#                         )
-#                     )
-#                     pending_next_capture_t += float(args.auto_interval_s)
-
-#                 if (now_cap - pending_start_t) >= float(args.auto_window_s):
-#                     if pending_records:
-#                         mid = len(pending_records) // 2
-#                         frame_for_event = pending_records[mid]["frame"]
-#                         idx_for_event = pending_records[mid]["idx"]
-#                     else:
-#                         frame_for_event = pending_trigger_frame if pending_trigger_frame is not None else frame
-#                         idx_for_event = pending_trigger_idx if pending_trigger_idx is not None else idx
-
-#                     ev_dir = save_event(
-#                         frame_dir=frame_dir,
-#                         events_dir=events_dir,
-#                         event_id=int(pending_event_id),
-#                         frame=frame_for_event,
-#                         idx=int(idx_for_event),
-#                         roi=roi,
-#                         trigger="auto_window",
-#                         auto_metrics=pending_auto_metrics,
-#                         burst_records=pending_records,
-#                     )
-
-#                     session["events"]["counts"]["total"] += 1
-#                     session["events"]["counts"]["auto"] += 1
-#                     safe_write_json(session_path, session)
-#                     print(f"[AUTO] Evento #{pending_event_id} guardado: {ev_dir} | burst={len(pending_records)}")
-
-#                     pending_auto_capture = False
-#                     pending_event_id = None
-#                     pending_auto_metrics = None
-#                     pending_trigger_idx = None
-#                     pending_trigger_frame = None
-#                     pending_records = []
-#                     pending_start_t = 0.0
-#                     pending_next_capture_t = 0.0
+#             ## if auto_trigger and args.events:
+#             ##     ...
+#             ##
+#             ## if pending_auto_capture:
+#             ##     ...
 
 #             if idx % fps_win == 0:
 #                 session["runtime"]["fps_real_last"] = (round(fps_real, 2) if fps_real is not None else None)
@@ -721,6 +672,7 @@
 
 #             if not args.no_display:
 #                 disp = frame.copy()
+
 #                 if roi is not None:
 #                     x, y, rw, rh = roi
 #                     cv2.rectangle(disp, (x, y), (x + rw, y + rh), (0, 255, 255), 2)
@@ -728,7 +680,7 @@
 #                 fps_txt = f"{fps_real:.1f}" if fps_real is not None else "..."
 #                 cv2.putText(
 #                     disp,
-#                     f"{args.auto_method.upper()} device={args.device} {w}x{h} idx={idx} saved={saved} fps={fps_txt}",
+#                     f"MVP MANUAL | device={args.device} {w}x{h} idx={idx} saved={saved} fps={fps_txt}",
 #                     (10, 30),
 #                     cv2.FONT_HERSHEY_SIMPLEX,
 #                     0.72,
@@ -737,57 +689,28 @@
 #                     cv2.LINE_AA,
 #                 )
 
-#                 if args.events and args.auto_events:
-#                     if args.auto_method == "motion":
-#                         mr_txt = f"{last_motion:.3f}" if last_motion is not None else "..."
-#                         cv2.putText(
-#                             disp,
-#                             f"AUTO(motion) motion={mr_txt} stable={stable_count}/{args.stable_frames} armed={1 if armed else 0}",
-#                             (10, 60),
-#                             cv2.FONT_HERSHEY_SIMPLEX,
-#                             0.62,
-#                             (0, 255, 255),
-#                             2,
-#                             cv2.LINE_AA,
-#                         )
-#                     else:
-#                         fg_txt = f"{last_fg_ratio:.3f}" if last_fg_ratio is not None else "..."
-#                         ma_txt = f"{last_max_area}" if last_max_area is not None else "..."
-#                         cv2.putText(
-#                             disp,
-#                             f"AUTO(bg) fg={fg_txt} maxA={ma_txt} present={present_count}/{args.present_frames} warmup_left={bg_warmup_left}",
-#                             (10, 60),
-#                             cv2.FONT_HERSHEY_SIMPLEX,
-#                             0.62,
-#                             (0, 255, 255),
-#                             2,
-#                             cv2.LINE_AA,
-#                         )
+#                 cv2.putText(
+#                     disp,
+#                     "Controles: q=salir | s=guardar frame | e=capturar evento y cerrar",
+#                     (10, 60),
+#                     cv2.FONT_HERSHEY_SIMPLEX,
+#                     0.62,
+#                     (0, 255, 255),
+#                     2,
+#                     cv2.LINE_AA,
+#                 )
 
-#                     if args.auto_use_window_capture:
-#                         if pending_auto_capture:
-#                             remaining = max(0.0, float(args.auto_window_s) - (time.time() - pending_start_t))
-#                             cv2.putText(
-#                                 disp,
-#                                 f"AUTO_WINDOW REC {remaining:.1f}s burst={len(pending_records)}",
-#                                 (10, 90),
-#                                 cv2.FONT_HERSHEY_SIMPLEX,
-#                                 0.62,
-#                                 (0, 128, 255),
-#                                 2,
-#                                 cv2.LINE_AA,
-#                             )
-#                         else:
-#                             cv2.putText(
-#                                 disp,
-#                                 f"AUTO_WINDOW {args.auto_window_s:.1f}s / {args.auto_interval_s:.2f}s",
-#                                 (10, 90),
-#                                 cv2.FONT_HERSHEY_SIMPLEX,
-#                                 0.62,
-#                                 (255, 200, 0),
-#                                 2,
-#                                 cv2.LINE_AA,
-#                             )
+#                 if roi is not None:
+#                     cv2.putText(
+#                         disp,
+#                         "ROI activa para captura controlada",
+#                         (10, 90),
+#                         cv2.FONT_HERSHEY_SIMPLEX,
+#                         0.62,
+#                         (255, 200, 0),
+#                         2,
+#                         cv2.LINE_AA,
+#                     )
 
 #                 cv2.imshow("Capture (OpenCV)", disp)
 #                 key = cv2.waitKey(1) & 0xFF
@@ -820,10 +743,26 @@
 #                         auto_metrics=None,
 #                         burst_records=burst_records,
 #                     )
+
+#                     captured_event_dir = str(ev_dir)
+#                     captured_frame_path = str(ev_dir / "frame.jpg")
+#                     captured_roi_path = str(ev_dir / "roi.jpg") if (ev_dir / "roi.jpg").exists() else None
+#                     captured_event_json_path = str(ev_dir / "event.json")
+
 #                     session["events"]["counts"]["total"] += 1
 #                     session["events"]["counts"]["manual"] += 1
+#                     session["last_manual_event"] = {
+#                         "event_id": event_id,
+#                         "event_dir": captured_event_dir,
+#                         "frame_path": captured_frame_path,
+#                         "roi_path": captured_roi_path,
+#                         "event_json_path": captured_event_json_path,
+#                     }
 #                     safe_write_json(session_path, session)
+
 #                     print(f"[EVENT] Manual #{event_id} guardado: {ev_dir} | burst={len(burst_records)}")
+#                     print("[INFO] Captura manual realizada. Cerrando ventana para retornar control al frontend...")
+#                     break
 
 #             idx += 1
 
@@ -848,6 +787,10 @@
 
 #         print("[DONE] Captura finalizada.")
 #         print(f"[TRACE] session.json: {session_path}")
+
+#         if session.get("last_manual_event"):
+#             print("[TRACE] last_manual_event:")
+#             print(json.dumps(session["last_manual_event"], ensure_ascii=False, indent=2))
 
 
 # if __name__ == "__main__":
@@ -1127,6 +1070,31 @@ def capture_auto_window(
     return records, idx
 
 
+def point_in_rect(px: int, py: int, rect: Tuple[int, int, int, int]) -> bool:
+    x1, y1, x2, y2 = rect
+    return x1 <= px <= x2 and y1 <= py <= y2
+
+
+def draw_button(
+    img,
+    rect: Tuple[int, int, int, int],
+    text: str,
+    fill_color: Tuple[int, int, int],
+    text_color: Tuple[int, int, int] = (0, 0, 0),
+) -> None:
+    x1, y1, x2, y2 = rect
+    cv2.rectangle(img, (x1, y1), (x2, y2), fill_color, -1)
+    cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 255), 2)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.75
+    thick = 2
+    (tw, th), _ = cv2.getTextSize(text, font, scale, thick)
+    tx = x1 + max(10, (x2 - x1 - tw) // 2)
+    ty = y1 + max(th + 8, (y2 - y1 + th) // 2)
+    cv2.putText(img, text, (tx, ty), font, scale, text_color, thick, cv2.LINE_AA)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
 
@@ -1248,18 +1216,6 @@ def main() -> None:
         events_dir.mkdir(parents=True, exist_ok=True)
         print(f"[INFO] Eventos habilitados: {events_dir}")
 
-        ## ======================================================
-        ## AUTO-EVENTOS DESACTIVADOS EN EL MVP
-        ## ======================================================
-        ## if args.auto_events:
-        ##     print(f"[INFO] Auto-eventos ON | method={args.auto_method} | cooldown_s={args.cooldown_s}")
-        ##     if args.auto_use_window_capture:
-        ##         print(
-        ##             f"[INFO] Auto-window ON | duration={args.auto_window_s:.1f}s | interval={args.auto_interval_s:.2f}s"
-        ##         )
-        ##     if roi is None:
-        ##         print("[WARN] auto_events sin ROI: funcionará, pero para PoC industrial se recomienda ROI en el mesón.")
-
     session_path = frame_dir / "session.json"
     session: Dict[str, Any] = {
         "session_id": ts,
@@ -1325,9 +1281,9 @@ def main() -> None:
 
     if not args.no_display:
         if args.events:
-            print("[INFO] Controles MVP: 'q' salir | 's' frame manual | 'e' CAPTURAR evento manual y cerrar")
+            print("[INFO] Controles MVP: 'q' salir | 's' frame manual | 'e' CAPTURAR evento manual y cerrar | touch botones")
         else:
-            print("[INFO] Controles MVP: 'q' salir | 's' frame manual")
+            print("[INFO] Controles MVP: 'q' salir | 's' frame manual | touch botón SALIR")
     else:
         print("[INFO] Headless: Ctrl+C para salir")
 
@@ -1342,9 +1298,6 @@ def main() -> None:
 
     event_id = 0
 
-    ## ==========================================================
-    ## ESTADOS DEL FLUJO AUTOMÁTICO (MANTENIDOS, PERO NO USADOS)
-    ## ==========================================================
     cooldown_until = 0.0
     armed = True
 
@@ -1358,20 +1311,9 @@ def main() -> None:
     last_fg_ratio: Optional[float] = None
     last_max_area: Optional[int] = None
 
-    ## if args.events and args.auto_events and args.auto_method == "bg":
-    ##     bg_sub = cv2.createBackgroundSubtractorMOG2(
-    ##         history=int(args.bg_history),
-    ##         varThreshold=int(args.bg_var_threshold),
-    ##         detectShadows=bool(args.bg_detect_shadows),
-    ##     )
-
     recent_buffer_size = max(3, int(args.manual_buffer))
     recent_frames: Deque[Dict[str, Any]] = deque(maxlen=recent_buffer_size)
 
-    ## ==========================================================
-    ## ESTADO PARA AUTO-WINDOW NO BLOQUEANTE
-    ## MANTENIDO SOLO COMO REFERENCIA FUTURA
-    ## ==========================================================
     pending_auto_capture = False
     pending_event_id: Optional[int] = None
     pending_auto_metrics: Optional[Dict[str, Any]] = None
@@ -1385,6 +1327,26 @@ def main() -> None:
     captured_frame_path: Optional[str] = None
     captured_roi_path: Optional[str] = None
     captured_event_json_path: Optional[str] = None
+
+    window_name = "Capture (OpenCV)"
+    touch_action: Optional[str] = None
+
+    def on_mouse(event, x, y, flags, param):
+        nonlocal touch_action
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+
+        rect_capture = param["rect_capture"]
+        rect_exit = param["rect_exit"]
+        events_enabled = param["events_enabled"]
+
+        if events_enabled and point_in_rect(x, y, rect_capture):
+            touch_action = "capture"
+        elif point_in_rect(x, y, rect_exit):
+            touch_action = "quit"
+
+    if not args.no_display:
+        cv2.namedWindow(window_name)
 
     try:
         while True:
@@ -1414,110 +1376,6 @@ def main() -> None:
                 win_start_t = time.time()
                 win_start_idx = idx
 
-            ## ======================================================
-            ## BLOQUE AUTOMÁTICO DESACTIVADO PARA MVP
-            ## ======================================================
-            ## auto_trigger = False
-            ## auto_metrics = None
-            ##
-            ## if args.events and args.auto_events:
-            ##     now = time.time()
-            ##     if now < cooldown_until:
-            ##         armed = False
-            ##         stable_count = 0
-            ##         present_count = 0
-            ##     else:
-            ##         roi_img = crop_roi(frame, roi) if roi else frame
-            ##         if roi_img is not None and roi_img.size > 0:
-            ##             if args.auto_method == "motion":
-            ##                 curr = to_gray_blur(roi_img)
-            ##                 if prev_gray is not None:
-            ##                     mr = motion_ratio(prev_gray, curr)
-            ##                     last_motion = mr
-            ##
-            ##                     if mr > args.enter_thr:
-            ##                         armed = True
-            ##                         stable_count = 0
-            ##
-            ##                     if armed and mr < args.stable_thr:
-            ##                         stable_count += 1
-            ##                     else:
-            ##                         stable_count = 0
-            ##
-            ##                     if armed and stable_count >= args.stable_frames:
-            ##                         auto_trigger = True
-            ##                         auto_metrics = {
-            ##                             "method": "motion",
-            ##                             "motion_ratio": float(mr),
-            ##                             "enter_thr": float(args.enter_thr),
-            ##                             "stable_thr": float(args.stable_thr),
-            ##                             "stable_frames": int(args.stable_frames),
-            ##                         }
-            ##                         armed = False
-            ##                         stable_count = 0
-            ##                         cooldown_until = time.time() + float(args.cooldown_s)
-            ##
-            ##                 prev_gray = curr
-            ##
-            ##             else:
-            ##                 assert bg_sub is not None
-            ##
-            ##                 fg = bg_sub.apply(roi_img)
-            ##                 if bg_warmup_left > 0:
-            ##                     bg_warmup_left -= 1
-            ##                     present_count = 0
-            ##                     armed = True
-            ##                 else:
-            ##                     _, fg = cv2.threshold(fg, 200, 255, cv2.THRESH_BINARY)
-            ##                     fg = cv2.medianBlur(fg, 5)
-            ##                     fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, None, iterations=1)
-            ##                     fg = cv2.morphologyEx(fg, cv2.MORPH_DILATE, None, iterations=1)
-            ##
-            ##                     fg_pixels = cv2.countNonZero(fg)
-            ##                     total = fg.shape[0] * fg.shape[1]
-            ##                     fg_ratio = fg_pixels / max(1, total)
-            ##                     last_fg_ratio = fg_ratio
-            ##
-            ##                     contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            ##                     max_area = 0
-            ##                     for c in contours:
-            ##                         a = int(cv2.contourArea(c))
-            ##                         if a > max_area:
-            ##                             max_area = a
-            ##                     last_max_area = max_area
-            ##
-            ##                     present = (fg_ratio >= float(args.min_fg_ratio)) or (max_area >= int(args.min_contour_area))
-            ##
-            ##                     if present:
-            ##                         present_count += 1
-            ##                     else:
-            ##                         present_count = 0
-            ##                         armed = True
-            ##
-            ##                     if armed and present_count >= int(args.present_frames):
-            ##                         auto_trigger = True
-            ##                         auto_metrics = {
-            ##                             "method": "bg",
-            ##                             "fg_ratio": float(fg_ratio),
-            ##                             "max_contour_area": int(max_area),
-            ##                             "min_fg_ratio": float(args.min_fg_ratio),
-            ##                             "min_contour_area": int(args.min_contour_area),
-            ##                             "present_frames": int(args.present_frames),
-            ##                             "bg_warmup": int(args.bg_warmup),
-            ##                             "bg_history": int(args.bg_history),
-            ##                             "bg_var_threshold": int(args.bg_var_threshold),
-            ##                             "detect_shadows": bool(args.bg_detect_shadows),
-            ##                         }
-            ##                         armed = False
-            ##                         present_count = 0
-            ##                         cooldown_until = time.time() + float(args.cooldown_s)
-
-            ## if auto_trigger and args.events:
-            ##     ...
-            ##
-            ## if pending_auto_capture:
-            ##     ...
-
             if idx % fps_win == 0:
                 session["runtime"]["fps_real_last"] = (round(fps_real, 2) if fps_real is not None else None)
                 session["runtime"]["frames_total"] = idx
@@ -1546,7 +1404,7 @@ def main() -> None:
 
                 cv2.putText(
                     disp,
-                    "Controles: q=salir | s=guardar frame | e=capturar evento y cerrar",
+                    "Controles: q=salir | s=guardar frame | e=capturar evento y cerrar | touch botones",
                     (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.62,
@@ -1567,13 +1425,41 @@ def main() -> None:
                         cv2.LINE_AA,
                     )
 
-                cv2.imshow("Capture (OpenCV)", disp)
+                btn_h = 60
+                btn_w_capture = 220
+                btn_w_exit = 140
+                btn_y1 = h - btn_h - 20
+                btn_y2 = h - 20
+                btn_capture = (20, btn_y1, 20 + btn_w_capture, btn_y2)
+                btn_exit = (20 + btn_w_capture + 20, btn_y1, 20 + btn_w_capture + 20 + btn_w_exit, btn_y2)
+
+                if args.events:
+                    draw_button(disp, btn_capture, "CAPTURAR", (0, 180, 0), (255, 255, 255))
+                draw_button(disp, btn_exit, "SALIR", (50, 50, 200), (255, 255, 255))
+
+                cv2.setMouseCallback(
+                    window_name,
+                    on_mouse,
+                    {
+                        "rect_capture": btn_capture,
+                        "rect_exit": btn_exit,
+                        "events_enabled": bool(args.events),
+                    },
+                )
+
+                cv2.imshow(window_name, disp)
                 key = cv2.waitKey(1) & 0xFF
 
-                if key == ord("q"):
+                do_quit = (key == ord("q")) or (touch_action == "quit")
+                do_save = (key == ord("s"))
+                do_capture = ((key == ord("e")) or (touch_action == "capture")) and args.events
+
+                touch_action = None
+
+                if do_quit:
                     break
 
-                if key == ord("s"):
+                if do_save:
                     epoch_ms = int(time.time() * 1000)
                     fp = frame_dir / f"manual_{idx:06d}_{epoch_ms}.jpg"
                     cv2.imwrite(str(fp), frame)
@@ -1581,7 +1467,7 @@ def main() -> None:
                     manual_saved += 1
                     print(f"[INFO] Guardado manual: {fp}")
 
-                if key == ord("e") and args.events:
+                if do_capture:
                     event_id += 1
 
                     burst_n = max(1, int(args.manual_burst))
