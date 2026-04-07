@@ -50,27 +50,32 @@ htmlcov/
 * 2.py
 
 # ----------------------------
-# Data
+# Data (runtime completo fuera)
 # ----------------------------
-# Ignorar todo data
-data/*
+data/
 
-# ---- Permitir estructura necesaria ----
-!data/picking/
-!data/picking/summary_fillRate_packStructure/
-!data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure.json
-
+# SOLO permitimos PackStructure (config del sistema)
 !data/tests_picking/
 !data/tests_picking/PackStructure.xlsx
 
-!data/fillrate/
-!data/fillrate/latest/
-!data/fillrate/latest/fillrate_latest.xlsx
+# ----------------------------
+# Capturas / eventos (runtime)
+# ----------------------------
+data/captures/
 
-data/fillrate/archive
+# ----------------------------
+# Fillrate (ya no se versiona)
+# ----------------------------
+data/fillrate/
 
+# ----------------------------
+# Datasets (entrenamiento)
+# ----------------------------
 datasets/
-captures/
+
+# ----------------------------
+# Multimedia (debug / evidencia)
+# ----------------------------
 *.mp4
 *.avi
 *.mov
@@ -82,26 +87,36 @@ captures/
 *.bmp
 
 # ----------------------------
-# YOLO runs (permitir solo modelos específicos)
+# YOLO runs (entrenamiento / inferencia)
 # ----------------------------
-runs/*
+runs/
+
+# Mantener SOLO modelo productivo
 !runs/detect/
 !runs/detect/runs_kuehne_nagel/
 !runs/detect/runs_kuehne_nagel/barcode_v1/
 !runs/detect/runs_kuehne_nagel/barcode_v1/weights/
 !runs/detect/runs_kuehne_nagel/barcode_v1/weights/best.pt
-!runs/detect/runs_kuehne_nagel/barcode_v1/weights/last.pt
-!runs/detect/runs_kuehne_nagel/barcode_v1/args.yaml
 
-!runs/detect/train2/
-!runs/detect/train2/weights/
-!runs/detect/train2/weights/best.pt
-!runs/detect/train2/weights/last.pt
+# mantener last.pt
+#!runs/detect/runs_kuehne_nagel/barcode_v1/weights/last.pt
 
+# ----------------------------
+# YOLO weights generales
+# ----------------------------
 yolov8*.pt
 
 # ----------------------------
-# Temporary outputs
+# Outputs y resultados
 # ----------------------------
 outputs/
 results/
+logs/
+
+# ----------------------------
+# OS / IDE
+# ----------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -835,10 +835,10 @@ def _dedupe_and_rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def detect_barcode_rois_yolo(
     img_bgr: np.ndarray,
     model_path: str = DEFAULT_MODEL_PATH,
-    conf: float = 0.25,
+    conf: float = 0.10, #0.25
     iou: float = 0.45,
     max_det: int = 10,
-    min_size: int = 40,
+    min_size: int = 20, #40
 ) -> List[Dict[str, Any]]:
     """
     Detecta ROIs candidatas de códigos de barra usando YOLO.

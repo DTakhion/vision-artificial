@@ -147,5 +147,13 @@ python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png 
   --save_vis \
   --save_crops
 
+## utils/vision_barcode_dynamsoft.py
+python -m utils.vision_barcode_dynamsoft \
+  data/tests_picking/capture_barcode_test.png \
+  --save-vis \
+  --out results/capture_barcode_test_dynamsoft.png \
+  --save-json \
+  --json-out results/capture_barcode_test_dynamsoft.json
+
 # Levantar Backend; 
 ## uvicorn backend.main:app --reload
