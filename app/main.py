@@ -726,17 +726,70 @@ def _build_fillrate_full_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# def _load_detected_barcodes_json(path: Path) -> Optional[List[str]]:
+#     raw_payload = safe_read_json(path)
+#     if raw_payload is None:
+#         return None
+
+#     if isinstance(raw_payload, dict):
+#         if isinstance(raw_payload.get("detected_barcodes"), list):
+#             return _dedupe_preserve_order(raw_payload.get("detected_barcodes"))
+
+#         if isinstance(raw_payload.get("barcodes"), list):
+#             return _dedupe_preserve_order(raw_payload.get("barcodes"))
+
+#         # Salida directa híbrida: {"items": [...]}
+#         items = raw_payload.get("items")
+#         if isinstance(items, list):
+#             texts = []
+#             for item in items:
+#                 if not isinstance(item, dict):
+#                     continue
+#                 text = item.get("text")
+#                 if text:
+#                     texts.append(text)
+#             return _dedupe_preserve_order(texts)
+
+#         # wrapped_result.json: {"result": {"items": [...]}}
+#         result = raw_payload.get("result")
+#         if isinstance(result, dict):
+#             items = result.get("items")
+#             if isinstance(items, list):
+#                 texts = []
+#                 for item in items:
+#                     if not isinstance(item, dict):
+#                         continue
+#                     text = item.get("text")
+#                     if text:
+#                         texts.append(text)
+#                 return _dedupe_preserve_order(texts)
+
+#         return None
+
+#     if isinstance(raw_payload, list):
+#         return _dedupe_preserve_order(raw_payload)
+
+#     return None
+
 def _load_detected_barcodes_json(path: Path) -> Optional[List[str]]:
     raw_payload = safe_read_json(path)
     if raw_payload is None:
         return None
 
+    def _normalize_barcode_list(values: List[Any]) -> List[str]:
+        out: List[str] = []
+        for x in values:
+            code = _norm_barcode(x)
+            if code:
+                out.append(code)
+        return out
+
     if isinstance(raw_payload, dict):
         if isinstance(raw_payload.get("detected_barcodes"), list):
-            return _dedupe_preserve_order(raw_payload.get("detected_barcodes"))
+            return _normalize_barcode_list(raw_payload.get("detected_barcodes"))
 
         if isinstance(raw_payload.get("barcodes"), list):
-            return _dedupe_preserve_order(raw_payload.get("barcodes"))
+            return _normalize_barcode_list(raw_payload.get("barcodes"))
 
         # Salida directa híbrida: {"items": [...]}
         items = raw_payload.get("items")
@@ -746,9 +799,10 @@ def _load_detected_barcodes_json(path: Path) -> Optional[List[str]]:
                 if not isinstance(item, dict):
                     continue
                 text = item.get("text")
-                if text:
-                    texts.append(text)
-            return _dedupe_preserve_order(texts)
+                code = _norm_barcode(text)
+                if code:
+                    texts.append(code)
+            return texts
 
         # wrapped_result.json: {"result": {"items": [...]}}
         result = raw_payload.get("result")
@@ -760,17 +814,17 @@ def _load_detected_barcodes_json(path: Path) -> Optional[List[str]]:
                     if not isinstance(item, dict):
                         continue
                     text = item.get("text")
-                    if text:
-                        texts.append(text)
-                return _dedupe_preserve_order(texts)
+                    code = _norm_barcode(text)
+                    if code:
+                        texts.append(code)
+                return texts
 
         return None
 
     if isinstance(raw_payload, list):
-        return _dedupe_preserve_order(raw_payload)
+        return _normalize_barcode_list(raw_payload)
 
     return None
-
 
 # def _parse_manual_barcodes(manual_barcodes: Optional[str]) -> List[str]:
 #     if not manual_barcodes:
@@ -1046,6 +1100,74 @@ def run_picking_match(
     print(json.dumps(final_summary, ensure_ascii=False, indent=2))
     return 0
 
+# def _extract_detected_items_for_frontend(
+#     readout_payload: Optional[Dict[str, Any]],
+#     detected_barcodes: Optional[List[str]],
+# ) -> List[Dict[str, Any]]:
+#     items_out: List[Dict[str, Any]] = []
+#     seen = set()
+
+#     if isinstance(readout_payload, dict):
+#         source_payload = readout_payload
+
+#         # Caso wrapped_result.json -> {"result": {...}}
+#         if isinstance(readout_payload.get("result"), dict):
+#             source_payload = readout_payload["result"]
+
+#         items = source_payload.get("items") or []
+#         if isinstance(items, list):
+#             for item in items:
+#                 if not isinstance(item, dict):
+#                     continue
+
+#                 barcode = _norm_barcode(item.get("text"))
+#                 if not barcode:
+#                     continue
+
+#                 key = (
+#                     barcode,
+#                     str(item.get("format") or "").strip(),
+#                     str(item.get("source") or "").strip(),
+#                 )
+#                 if key in seen:
+#                     continue
+#                 seen.add(key)
+
+#                 items_out.append(
+#                     {
+#                         "barcode": barcode,
+#                         "serial": barcode,  # por ahora serial = barcode detectado
+#                         "format": item.get("format"),
+#                         "source": item.get("source"),
+#                     }
+#                 )
+
+#     if detected_barcodes:
+#         for raw in detected_barcodes:
+#             barcode = _norm_barcode(raw)
+#             if not barcode:
+#                 continue
+
+#             key = (barcode, "", "")
+#             already_present = any(x.get("barcode") == barcode for x in items_out)
+#             if already_present:
+#                 continue
+
+#             if key in seen:
+#                 continue
+#             seen.add(key)
+
+#             items_out.append(
+#                 {
+#                     "barcode": barcode,
+#                     "serial": barcode,
+#                     "format": None,
+#                     "source": "detected_barcodes_json",
+#                 }
+#             )
+
+#     return items_out
+
 def _extract_detected_items_for_frontend(
     readout_payload: Optional[Dict[str, Any]],
     detected_barcodes: Optional[List[str]],
@@ -1070,10 +1192,14 @@ def _extract_detected_items_for_frontend(
                 if not barcode:
                     continue
 
+                bbox = item.get("bbox")
+                bbox_key = json.dumps(bbox, ensure_ascii=False, sort_keys=False) if bbox is not None else None
+
                 key = (
                     barcode,
                     str(item.get("format") or "").strip(),
                     str(item.get("source") or "").strip(),
+                    bbox_key,
                 )
                 if key in seen:
                     continue
@@ -1082,23 +1208,22 @@ def _extract_detected_items_for_frontend(
                 items_out.append(
                     {
                         "barcode": barcode,
-                        "serial": barcode,  # por ahora serial = barcode detectado
+                        "serial": barcode,
                         "format": item.get("format"),
                         "source": item.get("source"),
+                        "bbox": item.get("bbox"),
                     }
                 )
 
     if detected_barcodes:
-        for raw in detected_barcodes:
+        for idx, raw in enumerate(detected_barcodes):
             barcode = _norm_barcode(raw)
             if not barcode:
                 continue
 
-            key = (barcode, "", "")
-            already_present = any(x.get("barcode") == barcode for x in items_out)
-            if already_present:
-                continue
-
+            # Aquí NO deduplicamos por barcode solo.
+            # Si viene una lista con repetidos válidos, deben sobrevivir.
+            key = (barcode, "", "", f"manual_idx_{idx}")
             if key in seen:
                 continue
             seen.add(key)
@@ -1109,11 +1234,11 @@ def _extract_detected_items_for_frontend(
                     "serial": barcode,
                     "format": None,
                     "source": "detected_barcodes_json",
+                    "bbox": None,
                 }
             )
 
     return items_out
-
 
 def build_frontend_closure_summary(
     *,

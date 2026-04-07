@@ -194,23 +194,111 @@ def _extract_item_data(item: Any) -> Dict[str, Any]:
 
     return out
 
+def _bbox_iou(
+    bbox1: Optional[Tuple[int, int, int, int]],
+    bbox2: Optional[Tuple[int, int, int, int]],
+) -> float:
+    """
+    Calcula IoU entre dos bboxes xyxy.
+    """
+    if not bbox1 or not bbox2:
+        return 0.0
 
-def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    x1 = max(bbox1[0], bbox2[0])
+    y1 = max(bbox1[1], bbox2[1])
+    x2 = min(bbox1[2], bbox2[2])
+    y2 = min(bbox1[3], bbox2[3])
+
+    inter_w = max(0, x2 - x1)
+    inter_h = max(0, y2 - y1)
+    inter_area = inter_w * inter_h
+
+    area1 = max(0, bbox1[2] - bbox1[0]) * max(0, bbox1[3] - bbox1[1])
+    area2 = max(0, bbox2[2] - bbox2[0]) * max(0, bbox2[3] - bbox2[1])
+
+    union = area1 + area2 - inter_area
+    if union <= 0:
+        return 0.0
+
+    return inter_area / union
+
+
+def _bbox_center_distance(
+    bbox1: Optional[Tuple[int, int, int, int]],
+    bbox2: Optional[Tuple[int, int, int, int]],
+) -> float:
     """
-    Elimina duplicados obvios por (text, format).
-    Conserva el primer resultado.
+    Distancia euclidiana entre centros de dos bboxes xyxy.
     """
-    seen = set()
-    deduped = []
+    if not bbox1 or not bbox2:
+        return float("inf")
+
+    cx1 = (bbox1[0] + bbox1[2]) / 2.0
+    cy1 = (bbox1[1] + bbox1[3]) / 2.0
+    cx2 = (bbox2[0] + bbox2[2]) / 2.0
+    cy2 = (bbox2[1] + bbox2[3]) / 2.0
+
+    return float(((cx1 - cx2) ** 2 + (cy1 - cy2) ** 2) ** 0.5)
+
+
+def _dedupe_items_spatial(
+    items: List[Dict[str, Any]],
+    iou_threshold: float = 0.5,
+    center_distance_threshold: float = 35.0,
+) -> List[Dict[str, Any]]:
+    """
+    Deduplica sólo duplicados espaciales probables:
+    - mismo text
+    - mismo format
+    - bbox muy solapada o muy cercana
+
+    Conserva ambos si el texto es igual pero están en posiciones distintas.
+    """
+    kept: List[Dict[str, Any]] = []
 
     for item in items:
-        key = (item.get("text"), item.get("format"))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
+        text = item.get("text")
+        fmt = item.get("format")
+        bbox = item.get("bbox")
 
-    return deduped
+        is_duplicate = False
+
+        for prev in kept:
+            same_text = prev.get("text") == text
+            same_format = prev.get("format") == fmt
+
+            if not (same_text and same_format):
+                continue
+
+            prev_bbox = prev.get("bbox")
+            iou = _bbox_iou(bbox, prev_bbox)
+            dist = _bbox_center_distance(bbox, prev_bbox)
+
+            if iou >= iou_threshold or dist <= center_distance_threshold:
+                is_duplicate = True
+                break
+
+        if not is_duplicate:
+            kept.append(item)
+
+    return kept
+
+# def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+#     """
+#     Elimina duplicados obvios por (text, format).
+#     Conserva el primer resultado.
+#     """
+#     seen = set()
+#     deduped = []
+
+#     for item in items:
+#         key = (item.get("text"), item.get("format"))
+#         if key in seen:
+#             continue
+#         seen.add(key)
+#         deduped.append(item)
+
+#     return deduped
 
 
 def _capture_from_path(image_path: Union[str, Path]) -> Dict[str, Any]:
@@ -253,7 +341,7 @@ def _capture_from_path(image_path: Union[str, Path]) -> Dict[str, Any]:
     raw_items = barcode_result.get_items()
     items = [_extract_item_data(item) for item in raw_items]
     items = [item for item in items if item.get("text")]
-    items = _dedupe_items(items)
+    items = _dedupe_items_spatial(items)    
 
     if not items:
         return {
@@ -490,10 +578,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
- 
-# python -m utils.vision_barcode_dynamsoft \
-#   data/tests_picking/capture_barcode_test.png \
-#   --save-vis \
-#   --out results/capture_barcode_test_dynamsoft.png \
-#   --save-json \
-#   --json-out results/capture_barcode_test_dynamsoft.json

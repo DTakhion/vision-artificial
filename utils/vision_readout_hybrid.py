@@ -79,11 +79,73 @@ def _score_item(item: Dict[str, Any]) -> float:
     return score
 
 
+# def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+#     """
+#     Deduplica por texto, conservando la mejor evidencia.
+#     """
+#     best_by_text: Dict[str, Dict[str, Any]] = {}
+
+#     for item in items:
+#         text = str(item.get("text", "")).strip()
+#         if not _basic_text_validation(text):
+#             continue
+
+#         current_score = _score_item(item)
+#         item["_score"] = current_score
+
+#         prev = best_by_text.get(text)
+#         if prev is None or current_score > float(prev.get("_score", -1.0)):
+#             best_by_text[text] = item
+
+#     out = list(best_by_text.values())
+#     out.sort(key=lambda x: float(x.get("_score", -1.0)), reverse=True)
+
+#     for item in out:
+#         item.pop("_score", None)
+
+#     return out
+
+def _bbox_iou(b1: List[int] | None, b2: List[int] | None) -> float:
+    if not b1 or not b2 or len(b1) != 4 or len(b2) != 4:
+        return 0.0
+
+    x1 = max(b1[0], b2[0])
+    y1 = max(b1[1], b2[1])
+    x2 = min(b1[2], b2[2])
+    y2 = min(b1[3], b2[3])
+
+    inter_w = max(0, x2 - x1)
+    inter_h = max(0, y2 - y1)
+    inter = inter_w * inter_h
+
+    area1 = max(0, b1[2] - b1[0]) * max(0, b1[3] - b1[1])
+    area2 = max(0, b2[2] - b2[0]) * max(0, b2[3] - b2[1])
+
+    union = area1 + area2 - inter
+    if union <= 0:
+        return 0.0
+
+    return inter / union
+
+
+def _bbox_center_distance(b1: List[int] | None, b2: List[int] | None) -> float:
+    if not b1 or not b2 or len(b1) != 4 or len(b2) != 4:
+        return float("inf")
+
+    cx1 = (b1[0] + b1[2]) / 2.0
+    cy1 = (b1[1] + b1[3]) / 2.0
+    cx2 = (b2[0] + b2[2]) / 2.0
+    cy2 = (b2[1] + b2[3]) / 2.0
+
+    return float(((cx1 - cx2) ** 2 + (cy1 - cy2) ** 2) ** 0.5)
+
+
 def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Deduplica por texto, conservando la mejor evidencia.
+    Deduplica sólo si el texto es igual Y la evidencia espacial indica
+    que probablemente es el mismo objeto.
     """
-    best_by_text: Dict[str, Dict[str, Any]] = {}
+    kept: List[Dict[str, Any]] = []
 
     for item in items:
         text = str(item.get("text", "")).strip()
@@ -92,18 +154,38 @@ def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
         current_score = _score_item(item)
         item["_score"] = current_score
+        bbox = item.get("bbox")
 
-        prev = best_by_text.get(text)
-        if prev is None or current_score > float(prev.get("_score", -1.0)):
-            best_by_text[text] = item
+        duplicate_idx = None
 
-    out = list(best_by_text.values())
-    out.sort(key=lambda x: float(x.get("_score", -1.0)), reverse=True)
+        for idx, prev in enumerate(kept):
+            prev_text = str(prev.get("text", "")).strip()
+            if prev_text != text:
+                continue
 
-    for item in out:
+            prev_bbox = prev.get("bbox")
+            iou = _bbox_iou(bbox, prev_bbox)
+            dist = _bbox_center_distance(bbox, prev_bbox)
+
+            same_object = (iou >= 0.5) or (dist <= 35.0)
+
+            if same_object:
+                duplicate_idx = idx
+                break
+
+        if duplicate_idx is None:
+            kept.append(item)
+        else:
+            prev = kept[duplicate_idx]
+            if current_score > float(prev.get("_score", -1.0)):
+                kept[duplicate_idx] = item
+
+    kept.sort(key=lambda x: float(x.get("_score", -1.0)), reverse=True)
+
+    for item in kept:
         item.pop("_score", None)
 
-    return out
+    return kept
 
 
 def _normalize_format_name(fmt: Any) -> str:
@@ -217,7 +299,7 @@ def read_barcodes_hybrid(
     yolo_conf: float = 0.10,
     yolo_iou: float = 0.45,
     yolo_max_det: int = 10,
-    yolo_min_size: int = 40,
+    yolo_min_size: int = 20, #40
     yolo_pad_ratio: float = 0.25,
     yolo_decoder_mode: str = "collect_plus",
     yolo_decoder_budget_ms: int = 5000,
@@ -439,7 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--yolo-conf", type=float, default=0.10)
     parser.add_argument("--yolo-iou", type=float, default=0.45)
     parser.add_argument("--yolo-max-det", type=int, default=10)
-    parser.add_argument("--yolo-min-size", type=int, default=40)
+    parser.add_argument("--yolo-min-size", type=int, default=20) #40
     parser.add_argument("--yolo-pad-ratio", type=float, default=0.25)
     parser.add_argument("--yolo-decoder-mode", default="collect_plus")
     parser.add_argument("--yolo-decoder-budget", type=int, default=5000)
