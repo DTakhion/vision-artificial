@@ -347,7 +347,7 @@ def _capture_from_path(image_path: Union[str, Path]) -> Dict[str, Any]:
         return {
             "status": "not_found",
             "image_path": str(img_path),
-            "backend": "dynamsoft",
+            "backend": "hybrid",
             "items": [],
             "total": 0,
         }
@@ -355,7 +355,7 @@ def _capture_from_path(image_path: Union[str, Path]) -> Dict[str, Any]:
     return {
         "status": "success",
         "image_path": str(img_path),
-        "backend": "dynamsoft",
+        "backend": "hybrid",
         "items": items,
         "total": len(items),
     }
