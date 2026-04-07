@@ -1,0 +1,67 @@
+{
+  "event_id": 1,
+  "trigger": "manual",
+  "event_time_epoch_ms": 1775594303322,
+  "event_time_local": "2026-04-07 14:38:23",
+  "frame_idx": 288,
+  "paths": {
+    "frame": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\frame.jpg",
+    "roi": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\roi.jpg"
+  },
+  "roi": {
+    "x": 80,
+    "y": 80,
+    "w": 1700,
+    "h": 900
+  },
+  "readout": {
+    "barcode": null,
+    "qrcode": null,
+    "serial": null,
+    "status": "not_attempted"
+  },
+  "auto_metrics": null,
+  "burst": {
+    "enabled": true,
+    "count": 3,
+    "main_frame_path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\frames\\frame_02.jpg",
+    "main_roi_path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\roi_frames\\roi_02.jpg",
+    "frames": [
+      {
+        "index_in_burst": 1,
+        "frame_idx": 286,
+        "epoch_ms": 1775594303242,
+        "path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\frames\\frame_01.jpg"
+      },
+      {
+        "index_in_burst": 2,
+        "frame_idx": 287,
+        "epoch_ms": 1775594303274,
+        "path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\frames\\frame_02.jpg"
+      },
+      {
+        "index_in_burst": 3,
+        "frame_idx": 288,
+        "epoch_ms": 1775594303305,
+        "path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\frames\\frame_03.jpg"
+      }
+    ],
+    "roi_frames": [
+      {
+        "index_in_burst": 1,
+        "frame_idx": 286,
+        "path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\roi_frames\\roi_01.jpg"
+      },
+      {
+        "index_in_burst": 2,
+        "frame_idx": 287,
+        "path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\roi_frames\\roi_02.jpg"
+      },
+      {
+        "index_in_burst": 3,
+        "frame_idx": 288,
+        "path": "data\\captures\\opencv\\frames_20260407_143813\\events\\event_000001\\roi_frames\\roi_03.jpg"
+      }
+    ]
+  }
+}

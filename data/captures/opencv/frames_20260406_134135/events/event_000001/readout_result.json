@@ -1,0 +1,151 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "3606489778859",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        1477,
+        916,
+        1520,
+        1072
+      ],
+      "position": [
+        [
+          1516.0,
+          916.0
+        ],
+        [
+          1520.0,
+          1070.0
+        ],
+        [
+          1483.0,
+          1072.0
+        ],
+        [
+          1477.0,
+          917.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpzwvexj80.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "3606489778859",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1516.0,
+              916.0
+            ],
+            [
+              1520.0,
+              1070.0
+            ],
+            [
+              1483.0,
+              1072.0
+            ],
+            [
+              1477.0,
+              917.0
+            ]
+          ],
+          "bbox": [
+            1477,
+            916,
+            1520,
+            1072
+          ]
+        },
+        {
+          "text": "0824458455",
+          "format": "CODE_39_EXTENDED",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              420.0,
+              650.0
+            ],
+            [
+              536.0,
+              548.0
+            ],
+            [
+              555.0,
+              568.0
+            ],
+            [
+              437.0,
+              667.0
+            ]
+          ],
+          "bbox": [
+            420,
+            548,
+            555,
+            667
+          ]
+        }
+      ],
+      "total": 2,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": [
+      {
+        "text": "0824458455",
+        "format": "CODE_39_EXTENDED",
+        "backend": "hybrid",
+        "source": "full_image",
+        "bbox": [
+          420,
+          548,
+          555,
+          667
+        ],
+        "position": [
+          [
+            420.0,
+            650.0
+          ],
+          [
+            536.0,
+            548.0
+          ],
+          [
+            555.0,
+            568.0
+          ],
+          [
+            437.0,
+            667.0
+          ]
+        ]
+      }
+    ]
+  }
+}

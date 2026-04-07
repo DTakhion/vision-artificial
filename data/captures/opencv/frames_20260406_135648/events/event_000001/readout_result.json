@@ -1,0 +1,150 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 2,
+  "items": [
+    {
+      "text": "3606480567841",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        586,
+        299,
+        646,
+        571
+      ],
+      "position": [
+        [
+          599.0,
+          571.0
+        ],
+        [
+          586.0,
+          303.0
+        ],
+        [
+          633.0,
+          299.0
+        ],
+        [
+          646.0,
+          567.0
+        ]
+      ]
+    },
+    {
+      "text": "3606489778859",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        1092,
+        379,
+        1163,
+        652
+      ],
+      "position": [
+        [
+          1163.0,
+          379.0
+        ],
+        [
+          1158.0,
+          652.0
+        ],
+        [
+          1092.0,
+          652.0
+        ],
+        [
+          1097.0,
+          379.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpuia5swjt.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "3606480567841",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              599.0,
+              571.0
+            ],
+            [
+              586.0,
+              303.0
+            ],
+            [
+              633.0,
+              299.0
+            ],
+            [
+              646.0,
+              567.0
+            ]
+          ],
+          "bbox": [
+            586,
+            299,
+            646,
+            571
+          ]
+        },
+        {
+          "text": "3606489778859",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1163.0,
+              379.0
+            ],
+            [
+              1158.0,
+              652.0
+            ],
+            [
+              1092.0,
+              652.0
+            ],
+            [
+              1097.0,
+              379.0
+            ]
+          ],
+          "bbox": [
+            1092,
+            379,
+            1163,
+            652
+          ]
+        }
+      ],
+      "total": 2,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": []
+  }
+}

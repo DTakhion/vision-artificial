@@ -1,0 +1,151 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "3389110343113",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        823,
+        624,
+        990,
+        666
+      ],
+      "position": [
+        [
+          823.0,
+          626.0
+        ],
+        [
+          990.0,
+          624.0
+        ],
+        [
+          990.0,
+          664.0
+        ],
+        [
+          823.0,
+          666.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmp8ghu3hg9.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "3389110343113",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              823.0,
+              626.0
+            ],
+            [
+              990.0,
+              624.0
+            ],
+            [
+              990.0,
+              664.0
+            ],
+            [
+              823.0,
+              666.0
+            ]
+          ],
+          "bbox": [
+            823,
+            624,
+            990,
+            666
+          ]
+        },
+        {
+          "text": "https://go2se.com",
+          "format": "QR_CODE",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1076.0,
+              481.0
+            ],
+            [
+              1186.0,
+              479.0
+            ],
+            [
+              1183.0,
+              577.0
+            ],
+            [
+              1077.0,
+              581.0
+            ]
+          ],
+          "bbox": [
+            1076,
+            479,
+            1186,
+            581
+          ]
+        }
+      ],
+      "total": 2,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": [
+      {
+        "text": "https://go2se.com",
+        "format": "QR_CODE",
+        "backend": "hybrid",
+        "source": "full_image",
+        "bbox": [
+          1076,
+          479,
+          1186,
+          581
+        ],
+        "position": [
+          [
+            1076.0,
+            481.0
+          ],
+          [
+            1186.0,
+            479.0
+          ],
+          [
+            1183.0,
+            577.0
+          ],
+          [
+            1077.0,
+            581.0
+          ]
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "3606482193192",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        624,
+        678,
+        702,
+        712
+      ],
+      "position": [
+        [
+          624.0,
+          685.0
+        ],
+        [
+          699.0,
+          678.0
+        ],
+        [
+          702.0,
+          703.0
+        ],
+        [
+          627.0,
+          712.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmputw0gen7.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "3606482193192",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              624.0,
+              685.0
+            ],
+            [
+              699.0,
+              678.0
+            ],
+            [
+              702.0,
+              703.0
+            ],
+            [
+              627.0,
+              712.0
+            ]
+          ],
+          "bbox": [
+            624,
+            678,
+            702,
+            712
+          ]
+        }
+      ],
+      "total": 1,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": []
+  }
+}

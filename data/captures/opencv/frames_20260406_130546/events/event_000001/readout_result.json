@@ -1,0 +1,150 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 2,
+  "items": [
+    {
+      "text": "3595863966268",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        1015,
+        562,
+        1169,
+        612
+      ],
+      "position": [
+        [
+          1015.0,
+          577.0
+        ],
+        [
+          1165.0,
+          562.0
+        ],
+        [
+          1169.0,
+          598.0
+        ],
+        [
+          1017.0,
+          612.0
+        ]
+      ]
+    },
+    {
+      "text": "8B253901646",
+      "format": "CODE_128",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        1432,
+        698,
+        1478,
+        868
+      ],
+      "position": [
+        [
+          1444.0,
+          868.0
+        ],
+        [
+          1432.0,
+          700.0
+        ],
+        [
+          1465.0,
+          698.0
+        ],
+        [
+          1478.0,
+          864.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpjrd35ib7.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "3595863966268",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1015.0,
+              577.0
+            ],
+            [
+              1165.0,
+              562.0
+            ],
+            [
+              1169.0,
+              598.0
+            ],
+            [
+              1017.0,
+              612.0
+            ]
+          ],
+          "bbox": [
+            1015,
+            562,
+            1169,
+            612
+          ]
+        },
+        {
+          "text": "8B253901646",
+          "format": "CODE_128",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1444.0,
+              868.0
+            ],
+            [
+              1432.0,
+              700.0
+            ],
+            [
+              1465.0,
+              698.0
+            ],
+            [
+              1478.0,
+              864.0
+            ]
+          ],
+          "bbox": [
+            1432,
+            698,
+            1478,
+            868
+          ]
+        }
+      ],
+      "total": 2,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": []
+  }
+}

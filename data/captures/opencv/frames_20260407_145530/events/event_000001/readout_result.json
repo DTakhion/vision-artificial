@@ -1,0 +1,151 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "13606480589475",
+      "format": "ITF",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        1018,
+        608,
+        1056,
+        729
+      ],
+      "position": [
+        [
+          1028.0,
+          729.0
+        ],
+        [
+          1018.0,
+          611.0
+        ],
+        [
+          1046.0,
+          608.0
+        ],
+        [
+          1056.0,
+          725.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpunch6v5o.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "https://ww6.sec.cl/qr/qr.do?a=prod&i=0000000411205",
+          "format": "QR_CODE",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1153.0,
+              678.0
+            ],
+            [
+              1154.0,
+              735.0
+            ],
+            [
+              1099.0,
+              736.0
+            ],
+            [
+              1098.0,
+              680.0
+            ]
+          ],
+          "bbox": [
+            1098,
+            678,
+            1154,
+            736
+          ]
+        },
+        {
+          "text": "13606480589475",
+          "format": "ITF",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1028.0,
+              729.0
+            ],
+            [
+              1018.0,
+              611.0
+            ],
+            [
+              1046.0,
+              608.0
+            ],
+            [
+              1056.0,
+              725.0
+            ]
+          ],
+          "bbox": [
+            1018,
+            608,
+            1056,
+            729
+          ]
+        }
+      ],
+      "total": 2,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": [
+      {
+        "text": "https://ww6.sec.cl/qr/qr.do?a=prod&i=0000000411205",
+        "format": "QR_CODE",
+        "backend": "hybrid",
+        "source": "full_image",
+        "bbox": [
+          1098,
+          678,
+          1154,
+          736
+        ],
+        "position": [
+          [
+            1153.0,
+            678.0
+          ],
+          [
+            1154.0,
+            735.0
+          ],
+          [
+            1099.0,
+            736.0
+          ],
+          [
+            1098.0,
+            680.0
+          ]
+        ]
+      }
+    ]
+  }
+}

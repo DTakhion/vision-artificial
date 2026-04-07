@@ -1,0 +1,91 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "3389110343113",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        1006,
+        500,
+        1147,
+        550
+      ],
+      "position": [
+        [
+          1006.0,
+          516.0
+        ],
+        [
+          1144.0,
+          500.0
+        ],
+        [
+          1147.0,
+          534.0
+        ],
+        [
+          1009.0,
+          550.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpweiz6r33.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "3389110343113",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1006.0,
+              516.0
+            ],
+            [
+              1144.0,
+              500.0
+            ],
+            [
+              1147.0,
+              534.0
+            ],
+            [
+              1009.0,
+              550.0
+            ]
+          ],
+          "bbox": [
+            1006,
+            500,
+            1147,
+            550
+          ]
+        }
+      ],
+      "total": 1,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": []
+  }
+}

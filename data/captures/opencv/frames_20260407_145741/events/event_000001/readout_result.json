@@ -1,0 +1,210 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "13606480589475",
+      "format": "ITF",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        1020,
+        626,
+        1242,
+        686
+      ],
+      "position": [
+        [
+          1242.0,
+          674.0
+        ],
+        [
+          1022.0,
+          686.0
+        ],
+        [
+          1020.0,
+          638.0
+        ],
+        [
+          1241.0,
+          626.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpy9dmvdz9.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "https://ww6.sec.cl/qr/qr.do?a=prod&i=0000000411205",
+          "format": "QR_CODE",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              406.0,
+              394.0
+            ],
+            [
+              517.0,
+              398.0
+            ],
+            [
+              514.0,
+              506.0
+            ],
+            [
+              404.0,
+              503.0
+            ]
+          ],
+          "bbox": [
+            404,
+            394,
+            517,
+            506
+          ]
+        },
+        {
+          "text": "https://ww6.sec.cl/qr/qr.do?a=prod&i=0000000411205",
+          "format": "QR_CODE",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1146.0,
+              486.0
+            ],
+            [
+              1252.0,
+              483.0
+            ],
+            [
+              1254.0,
+              591.0
+            ],
+            [
+              1147.0,
+              593.0
+            ]
+          ],
+          "bbox": [
+            1146,
+            483,
+            1254,
+            593
+          ]
+        },
+        {
+          "text": "13606480589475",
+          "format": "ITF",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              1242.0,
+              674.0
+            ],
+            [
+              1022.0,
+              686.0
+            ],
+            [
+              1020.0,
+              638.0
+            ],
+            [
+              1241.0,
+              626.0
+            ]
+          ],
+          "bbox": [
+            1020,
+            626,
+            1242,
+            686
+          ]
+        }
+      ],
+      "total": 3,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": [
+      {
+        "text": "https://ww6.sec.cl/qr/qr.do?a=prod&i=0000000411205",
+        "format": "QR_CODE",
+        "backend": "hybrid",
+        "source": "full_image",
+        "bbox": [
+          404,
+          394,
+          517,
+          506
+        ],
+        "position": [
+          [
+            406.0,
+            394.0
+          ],
+          [
+            517.0,
+            398.0
+          ],
+          [
+            514.0,
+            506.0
+          ],
+          [
+            404.0,
+            503.0
+          ]
+        ]
+      },
+      {
+        "text": "https://ww6.sec.cl/qr/qr.do?a=prod&i=0000000411205",
+        "format": "QR_CODE",
+        "backend": "hybrid",
+        "source": "full_image",
+        "bbox": [
+          1146,
+          483,
+          1254,
+          593
+        ],
+        "position": [
+          [
+            1146.0,
+            486.0
+          ],
+          [
+            1252.0,
+            483.0
+          ],
+          [
+            1254.0,
+            591.0
+          ],
+          [
+            1147.0,
+            593.0
+          ]
+        ]
+      }
+    ]
+  }
+}

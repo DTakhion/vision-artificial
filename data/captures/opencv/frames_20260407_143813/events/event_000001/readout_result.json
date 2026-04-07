@@ -1,0 +1,91 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "PACK04",
+      "format": "CODE_128",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        139,
+        325,
+        192,
+        468
+      ],
+      "position": [
+        [
+          178.0,
+          325.0
+        ],
+        [
+          192.0,
+          464.0
+        ],
+        [
+          152.0,
+          468.0
+        ],
+        [
+          139.0,
+          328.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpnhrcg_cv.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "PACK04",
+          "format": "CODE_128",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              178.0,
+              325.0
+            ],
+            [
+              192.0,
+              464.0
+            ],
+            [
+              152.0,
+              468.0
+            ],
+            [
+              139.0,
+              328.0
+            ]
+          ],
+          "bbox": [
+            139,
+            325,
+            192,
+            468
+          ]
+        }
+      ],
+      "total": 1,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": []
+  }
+}

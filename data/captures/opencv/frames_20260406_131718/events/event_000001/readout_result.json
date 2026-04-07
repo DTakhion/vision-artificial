@@ -1,0 +1,332 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "3606489778859",
+      "format": "EAN_13",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        485,
+        137,
+        797,
+        221
+      ],
+      "position": [
+        [
+          485.0,
+          143.0
+        ],
+        [
+          797.0,
+          137.0
+        ],
+        [
+          797.0,
+          215.0
+        ],
+        [
+          485.0,
+          221.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpm5k6a_tb.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "3606489778859",
+          "format": "EAN_13",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              485.0,
+              143.0
+            ],
+            [
+              797.0,
+              137.0
+            ],
+            [
+              797.0,
+              215.0
+            ],
+            [
+              485.0,
+              221.0
+            ]
+          ],
+          "bbox": [
+            485,
+            137,
+            797,
+            221
+          ]
+        }
+      ],
+      "total": 1,
+      "source": "ndarray"
+    },
+    "yolo_rois": [
+      {
+        "bbox_xyxy": [
+          469,
+          101,
+          813,
+          314
+        ],
+        "bbox": [
+          469,
+          101,
+          344,
+          213
+        ],
+        "conf": 0.2746587097644806,
+        "cls": 0,
+        "area": 73272
+      }
+    ],
+    "yolo_pipeline": {
+      "status": "success",
+      "total_rois": 1,
+      "items": [
+        {
+          "text": "3606489778859",
+          "format": "EAN-13",
+          "position": [
+            [
+              112.0,
+              162.0
+            ],
+            [
+              426.0,
+              162.0
+            ],
+            [
+              422.0,
+              118.0
+            ],
+            [
+              109.0,
+              118.0
+            ]
+          ],
+          "backend": "zxingcpp",
+          "variant": "gray",
+          "candidate": "gray",
+          "source": "yolo_roi_0",
+          "score": 4.14,
+          "yolo_roi_index": 0,
+          "yolo_bbox_xyxy_original": [
+            469,
+            101,
+            813,
+            314
+          ],
+          "yolo_bbox_xyxy_padded": [
+            383,
+            61,
+            899,
+            354
+          ],
+          "yolo_conf": 0.2746587097644806,
+          "yolo_cls": 0,
+          "yolo_crop_variant": "deskew_est_-5.19",
+          "yolo_preprocess": "orig",
+          "decoder_backend": "primary_decoder"
+        }
+      ],
+      "rois": [
+        {
+          "roi_index": 0,
+          "bbox_xyxy_original": [
+            469,
+            101,
+            813,
+            314
+          ],
+          "bbox_xyxy_padded": [
+            383,
+            61,
+            899,
+            354
+          ],
+          "conf": 0.2746587097644806,
+          "cls": 0
+        }
+      ]
+    },
+    "dynamsoft_yolo_rois": [
+      {
+        "roi_index": 0,
+        "bbox_xyxy_original": [
+          469,
+          101,
+          813,
+          314
+        ],
+        "bbox_xyxy_padded": [
+          383,
+          61,
+          899,
+          354
+        ],
+        "conf": 0.2746587097644806,
+        "variants": [
+          {
+            "variant": "orig",
+            "result": {
+              "status": "success",
+              "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmppgt224yo.png",
+              "backend": "dynamsoft",
+              "items": [
+                {
+                  "text": "3606489778859",
+                  "format": "EAN_13",
+                  "backend": "dynamsoft",
+                  "position": [
+                    [
+                      102.0,
+                      82.0
+                    ],
+                    [
+                      414.0,
+                      76.0
+                    ],
+                    [
+                      414.0,
+                      154.0
+                    ],
+                    [
+                      102.0,
+                      160.0
+                    ]
+                  ],
+                  "bbox": [
+                    102,
+                    76,
+                    414,
+                    160
+                  ]
+                }
+              ],
+              "total": 1,
+              "source": "ndarray"
+            }
+          },
+          {
+            "variant": "rot90",
+            "result": {
+              "status": "success",
+              "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpq6_pecfl.png",
+              "backend": "dynamsoft",
+              "items": [
+                {
+                  "text": "3606489778859",
+                  "format": "EAN_13",
+                  "backend": "dynamsoft",
+                  "position": [
+                    [
+                      210.0,
+                      101.0
+                    ],
+                    [
+                      215.0,
+                      414.0
+                    ],
+                    [
+                      138.0,
+                      413.0
+                    ],
+                    [
+                      131.0,
+                      102.0
+                    ]
+                  ],
+                  "bbox": [
+                    131,
+                    101,
+                    215,
+                    414
+                  ]
+                }
+              ],
+              "total": 1,
+              "source": "ndarray"
+            }
+          },
+          {
+            "variant": "rot270",
+            "result": {
+              "status": "success",
+              "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmpwsj2sodx.png",
+              "backend": "dynamsoft",
+              "items": [
+                {
+                  "text": "3606489778859",
+                  "format": "EAN_13",
+                  "backend": "dynamsoft",
+                  "position": [
+                    [
+                      82.0,
+                      414.0
+                    ],
+                    [
+                      76.0,
+                      98.0
+                    ],
+                    [
+                      154.0,
+                      100.0
+                    ],
+                    [
+                      160.0,
+                      413.0
+                    ]
+                  ],
+                  "bbox": [
+                    76,
+                    98,
+                    160,
+                    414
+                  ]
+                }
+              ],
+              "total": 1,
+              "source": "ndarray"
+            }
+          }
+        ]
+      }
+    ],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": [
+      {
+        "text": "3606489778859",
+        "format": "EAN-13",
+        "backend": "hybrid",
+        "source": "yolo_pipeline",
+        "bbox": [
+          383,
+          61,
+          899,
+          354
+        ],
+        "yolo_conf": 0.2746587097644806,
+        "yolo_roi_index": 0,
+        "yolo_crop_variant": "deskew_est_-5.19",
+        "yolo_preprocess": "orig"
+      }
+    ]
+  }
+}

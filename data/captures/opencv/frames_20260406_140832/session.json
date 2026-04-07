@@ -1,0 +1,68 @@
+{
+  "session_id": "20260406_140832",
+  "start_time_local": "2026-04-06 14:08:32",
+  "start_time_epoch": 1775506112.096164,
+  "camera": {
+    "device": 0,
+    "backend": "DSHOW",
+    "requested": {
+      "width": 1920,
+      "height": 1080,
+      "fps": 30
+    },
+    "actual": {
+      "width": 1920,
+      "height": 1080,
+      "fps_reported": 30.0,
+      "fourcc": "YUY2"
+    }
+  },
+  "capture": {
+    "out_dir": "data\\captures\\opencv",
+    "frame_dir": "data\\captures\\opencv\\frames_20260406_140832",
+    "every": 0,
+    "save_video": false,
+    "video_path": null,
+    "manual_burst": 3,
+    "manual_buffer": 5,
+    "auto_use_window_capture": false,
+    "auto_window_s": 20.0,
+    "auto_interval_s": 1.0,
+    "preview_max_w": 1280,
+    "preview_max_h": 720
+  },
+  "events": {
+    "enabled": true,
+    "auto_enabled": false,
+    "auto_method": null,
+    "roi": {
+      "x": 80,
+      "y": 80,
+      "w": 1700,
+      "h": 900
+    },
+    "counts": {
+      "total": 1,
+      "manual": 1,
+      "auto": 0
+    }
+  },
+  "runtime": {
+    "no_display": false,
+    "fps_window": 30,
+    "fps_real_last": 30.2,
+    "frames_total": 385,
+    "frames_saved": 0,
+    "manual_saved": 0
+  },
+  "last_manual_event": {
+    "event_id": 1,
+    "event_dir": "data\\captures\\opencv\\frames_20260406_140832\\events\\event_000001",
+    "frame_path": "data\\captures\\opencv\\frames_20260406_140832\\events\\event_000001\\frame.jpg",
+    "roi_path": "data\\captures\\opencv\\frames_20260406_140832\\events\\event_000001\\roi.jpg",
+    "event_json_path": "data\\captures\\opencv\\frames_20260406_140832\\events\\event_000001\\event.json"
+  },
+  "end_time_local": "2026-04-06 14:08:45",
+  "end_time_epoch": 1775506125.405008,
+  "status": "done"
+}

@@ -1,0 +1,91 @@
+{
+  "status": "success",
+  "backend": "hybrid",
+  "total": 1,
+  "items": [
+    {
+      "text": "21261285490",
+      "format": "CODE_128",
+      "backend": "hybrid",
+      "source": "full_image",
+      "bbox": [
+        292,
+        785,
+        509,
+        825
+      ],
+      "position": [
+        [
+          292.0,
+          794.0
+        ],
+        [
+          509.0,
+          785.0
+        ],
+        [
+          509.0,
+          815.0
+        ],
+        [
+          293.0,
+          825.0
+        ]
+      ]
+    }
+  ],
+  "debug": {
+    "dynamsoft_full_image": {
+      "status": "success",
+      "image_path": "C:\\Users\\Test\\AppData\\Local\\Temp\\tmp3z7y1cor.png",
+      "backend": "dynamsoft",
+      "items": [
+        {
+          "text": "21261285490",
+          "format": "CODE_128",
+          "backend": "dynamsoft",
+          "position": [
+            [
+              292.0,
+              794.0
+            ],
+            [
+              509.0,
+              785.0
+            ],
+            [
+              509.0,
+              815.0
+            ],
+            [
+              293.0,
+              825.0
+            ]
+          ],
+          "bbox": [
+            292,
+            785,
+            509,
+            825
+          ]
+        }
+      ],
+      "total": 1,
+      "source": "ndarray"
+    },
+    "yolo_rois": [],
+    "yolo_pipeline": {
+      "status": "no_rois",
+      "total_rois": 0,
+      "items": [],
+      "rois": []
+    },
+    "dynamsoft_yolo_rois": [],
+    "allowed_formats": [
+      "CODE_128",
+      "EAN_13",
+      "ITF"
+    ],
+    "filtered_out": []
+  }
+}
