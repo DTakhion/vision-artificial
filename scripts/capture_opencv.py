@@ -10,15 +10,57 @@
 # from typing import Any, Deque, Dict, List, Optional, Tuple
 
 # import cv2
+# import platform
 
+
+# # def open_camera(device: int, width: int, height: int, fps: int) -> cv2.VideoCapture:
+# #     cap = cv2.VideoCapture(device, cv2.CAP_AVFOUNDATION)  # macOS: AVFoundation
+# #     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
+# #     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+# #     cap.set(cv2.CAP_PROP_FPS, int(fps))
+# #     return cap
 
 # def open_camera(device: int, width: int, height: int, fps: int) -> cv2.VideoCapture:
-#     cap = cv2.VideoCapture(device, cv2.CAP_AVFOUNDATION)  # macOS: AVFoundation
-#     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
-#     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
-#     cap.set(cv2.CAP_PROP_FPS, int(fps))
-#     return cap
+#     system = platform.system()
 
+#     # Orden de backends por sistema
+#     if system == "Windows":
+#         candidates = [
+#             ("DSHOW", cv2.CAP_DSHOW),
+#             ("MSMF", cv2.CAP_MSMF),
+#             ("DEFAULT", None),
+#         ]
+#     elif system == "Darwin":  # macOS
+#         candidates = [
+#             ("AVFOUNDATION", cv2.CAP_AVFOUNDATION),
+#             ("DEFAULT", None),
+#         ]
+#     else:  # Linux / otros
+#         candidates = [
+#             ("DEFAULT", None),
+#         ]
+
+#     for backend_name, backend in candidates:
+#         if backend is None:
+#             cap = cv2.VideoCapture(device)
+#         else:
+#             cap = cv2.VideoCapture(device, backend)
+
+#         if cap is not None and cap.isOpened():
+#             cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
+#             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+#             cap.set(cv2.CAP_PROP_FPS, int(fps))
+
+#             # Revalidamos después de setear propiedades
+#             ok, frame = cap.read()
+#             if ok and frame is not None and frame.size > 0:
+#                 print(f"[INFO] Cámara abierta con backend: {backend_name}")
+#                 return cap
+
+#             cap.release()
+
+#     # Si nada funcionó, devolvemos un capture inválido
+#     return cv2.VideoCapture()
 
 # def warmup_read(cap: cv2.VideoCapture, tries: int = 60, sleep_s: float = 0.03):
 #     last = None
@@ -272,6 +314,31 @@
 #     return records, idx
 
 
+# def point_in_rect(px: int, py: int, rect: Tuple[int, int, int, int]) -> bool:
+#     x1, y1, x2, y2 = rect
+#     return x1 <= px <= x2 and y1 <= py <= y2
+
+
+# def draw_button(
+#     img,
+#     rect: Tuple[int, int, int, int],
+#     text: str,
+#     fill_color: Tuple[int, int, int],
+#     text_color: Tuple[int, int, int] = (0, 0, 0),
+# ) -> None:
+#     x1, y1, x2, y2 = rect
+#     cv2.rectangle(img, (x1, y1), (x2, y2), fill_color, -1)
+#     cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 255), 2)
+
+#     font = cv2.FONT_HERSHEY_SIMPLEX
+#     scale = 0.75
+#     thick = 2
+#     (tw, th), _ = cv2.getTextSize(text, font, scale, thick)
+#     tx = x1 + max(10, (x2 - x1 - tw) // 2)
+#     ty = y1 + max(th + 8, (y2 - y1 + th) // 2)
+#     cv2.putText(img, text, (tx, ty), font, scale, text_color, thick, cv2.LINE_AA)
+
+
 # def main() -> None:
 #     ap = argparse.ArgumentParser()
 
@@ -393,18 +460,6 @@
 #         events_dir.mkdir(parents=True, exist_ok=True)
 #         print(f"[INFO] Eventos habilitados: {events_dir}")
 
-#         ## ======================================================
-#         ## AUTO-EVENTOS DESACTIVADOS EN EL MVP
-#         ## ======================================================
-#         ## if args.auto_events:
-#         ##     print(f"[INFO] Auto-eventos ON | method={args.auto_method} | cooldown_s={args.cooldown_s}")
-#         ##     if args.auto_use_window_capture:
-#         ##         print(
-#         ##             f"[INFO] Auto-window ON | duration={args.auto_window_s:.1f}s | interval={args.auto_interval_s:.2f}s"
-#         ##         )
-#         ##     if roi is None:
-#         ##         print("[WARN] auto_events sin ROI: funcionará, pero para PoC industrial se recomienda ROI en el mesón.")
-
 #     session_path = frame_dir / "session.json"
 #     session: Dict[str, Any] = {
 #         "session_id": ts,
@@ -470,9 +525,9 @@
 
 #     if not args.no_display:
 #         if args.events:
-#             print("[INFO] Controles MVP: 'q' salir | 's' frame manual | 'e' CAPTURAR evento manual y cerrar")
+#             print("[INFO] Controles MVP: 'q' salir | 's' frame manual | 'e' CAPTURAR evento manual y cerrar | touch botones")
 #         else:
-#             print("[INFO] Controles MVP: 'q' salir | 's' frame manual")
+#             print("[INFO] Controles MVP: 'q' salir | 's' frame manual | touch botón SALIR")
 #     else:
 #         print("[INFO] Headless: Ctrl+C para salir")
 
@@ -487,9 +542,6 @@
 
 #     event_id = 0
 
-#     ## ==========================================================
-#     ## ESTADOS DEL FLUJO AUTOMÁTICO (MANTENIDOS, PERO NO USADOS)
-#     ## ==========================================================
 #     cooldown_until = 0.0
 #     armed = True
 
@@ -503,20 +555,9 @@
 #     last_fg_ratio: Optional[float] = None
 #     last_max_area: Optional[int] = None
 
-#     ## if args.events and args.auto_events and args.auto_method == "bg":
-#     ##     bg_sub = cv2.createBackgroundSubtractorMOG2(
-#     ##         history=int(args.bg_history),
-#     ##         varThreshold=int(args.bg_var_threshold),
-#     ##         detectShadows=bool(args.bg_detect_shadows),
-#     ##     )
-
 #     recent_buffer_size = max(3, int(args.manual_buffer))
 #     recent_frames: Deque[Dict[str, Any]] = deque(maxlen=recent_buffer_size)
 
-#     ## ==========================================================
-#     ## ESTADO PARA AUTO-WINDOW NO BLOQUEANTE
-#     ## MANTENIDO SOLO COMO REFERENCIA FUTURA
-#     ## ==========================================================
 #     pending_auto_capture = False
 #     pending_event_id: Optional[int] = None
 #     pending_auto_metrics: Optional[Dict[str, Any]] = None
@@ -530,6 +571,26 @@
 #     captured_frame_path: Optional[str] = None
 #     captured_roi_path: Optional[str] = None
 #     captured_event_json_path: Optional[str] = None
+
+#     window_name = "Capture (OpenCV)"
+#     touch_action: Optional[str] = None
+
+#     def on_mouse(event, x, y, flags, param):
+#         nonlocal touch_action
+#         if event != cv2.EVENT_LBUTTONDOWN:
+#             return
+
+#         rect_capture = param["rect_capture"]
+#         rect_exit = param["rect_exit"]
+#         events_enabled = param["events_enabled"]
+
+#         if events_enabled and point_in_rect(x, y, rect_capture):
+#             touch_action = "capture"
+#         elif point_in_rect(x, y, rect_exit):
+#             touch_action = "quit"
+
+#     if not args.no_display:
+#         cv2.namedWindow(window_name)
 
 #     try:
 #         while True:
@@ -559,110 +620,6 @@
 #                 win_start_t = time.time()
 #                 win_start_idx = idx
 
-#             ## ======================================================
-#             ## BLOQUE AUTOMÁTICO DESACTIVADO PARA MVP
-#             ## ======================================================
-#             ## auto_trigger = False
-#             ## auto_metrics = None
-#             ##
-#             ## if args.events and args.auto_events:
-#             ##     now = time.time()
-#             ##     if now < cooldown_until:
-#             ##         armed = False
-#             ##         stable_count = 0
-#             ##         present_count = 0
-#             ##     else:
-#             ##         roi_img = crop_roi(frame, roi) if roi else frame
-#             ##         if roi_img is not None and roi_img.size > 0:
-#             ##             if args.auto_method == "motion":
-#             ##                 curr = to_gray_blur(roi_img)
-#             ##                 if prev_gray is not None:
-#             ##                     mr = motion_ratio(prev_gray, curr)
-#             ##                     last_motion = mr
-#             ##
-#             ##                     if mr > args.enter_thr:
-#             ##                         armed = True
-#             ##                         stable_count = 0
-#             ##
-#             ##                     if armed and mr < args.stable_thr:
-#             ##                         stable_count += 1
-#             ##                     else:
-#             ##                         stable_count = 0
-#             ##
-#             ##                     if armed and stable_count >= args.stable_frames:
-#             ##                         auto_trigger = True
-#             ##                         auto_metrics = {
-#             ##                             "method": "motion",
-#             ##                             "motion_ratio": float(mr),
-#             ##                             "enter_thr": float(args.enter_thr),
-#             ##                             "stable_thr": float(args.stable_thr),
-#             ##                             "stable_frames": int(args.stable_frames),
-#             ##                         }
-#             ##                         armed = False
-#             ##                         stable_count = 0
-#             ##                         cooldown_until = time.time() + float(args.cooldown_s)
-#             ##
-#             ##                 prev_gray = curr
-#             ##
-#             ##             else:
-#             ##                 assert bg_sub is not None
-#             ##
-#             ##                 fg = bg_sub.apply(roi_img)
-#             ##                 if bg_warmup_left > 0:
-#             ##                     bg_warmup_left -= 1
-#             ##                     present_count = 0
-#             ##                     armed = True
-#             ##                 else:
-#             ##                     _, fg = cv2.threshold(fg, 200, 255, cv2.THRESH_BINARY)
-#             ##                     fg = cv2.medianBlur(fg, 5)
-#             ##                     fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, None, iterations=1)
-#             ##                     fg = cv2.morphologyEx(fg, cv2.MORPH_DILATE, None, iterations=1)
-#             ##
-#             ##                     fg_pixels = cv2.countNonZero(fg)
-#             ##                     total = fg.shape[0] * fg.shape[1]
-#             ##                     fg_ratio = fg_pixels / max(1, total)
-#             ##                     last_fg_ratio = fg_ratio
-#             ##
-#             ##                     contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-#             ##                     max_area = 0
-#             ##                     for c in contours:
-#             ##                         a = int(cv2.contourArea(c))
-#             ##                         if a > max_area:
-#             ##                             max_area = a
-#             ##                     last_max_area = max_area
-#             ##
-#             ##                     present = (fg_ratio >= float(args.min_fg_ratio)) or (max_area >= int(args.min_contour_area))
-#             ##
-#             ##                     if present:
-#             ##                         present_count += 1
-#             ##                     else:
-#             ##                         present_count = 0
-#             ##                         armed = True
-#             ##
-#             ##                     if armed and present_count >= int(args.present_frames):
-#             ##                         auto_trigger = True
-#             ##                         auto_metrics = {
-#             ##                             "method": "bg",
-#             ##                             "fg_ratio": float(fg_ratio),
-#             ##                             "max_contour_area": int(max_area),
-#             ##                             "min_fg_ratio": float(args.min_fg_ratio),
-#             ##                             "min_contour_area": int(args.min_contour_area),
-#             ##                             "present_frames": int(args.present_frames),
-#             ##                             "bg_warmup": int(args.bg_warmup),
-#             ##                             "bg_history": int(args.bg_history),
-#             ##                             "bg_var_threshold": int(args.bg_var_threshold),
-#             ##                             "detect_shadows": bool(args.bg_detect_shadows),
-#             ##                         }
-#             ##                         armed = False
-#             ##                         present_count = 0
-#             ##                         cooldown_until = time.time() + float(args.cooldown_s)
-
-#             ## if auto_trigger and args.events:
-#             ##     ...
-#             ##
-#             ## if pending_auto_capture:
-#             ##     ...
-
 #             if idx % fps_win == 0:
 #                 session["runtime"]["fps_real_last"] = (round(fps_real, 2) if fps_real is not None else None)
 #                 session["runtime"]["frames_total"] = idx
@@ -691,7 +648,7 @@
 
 #                 cv2.putText(
 #                     disp,
-#                     "Controles: q=salir | s=guardar frame | e=capturar evento y cerrar",
+#                     "Controles: q=salir | s=guardar frame | e=capturar evento y cerrar | touch botones",
 #                     (10, 60),
 #                     cv2.FONT_HERSHEY_SIMPLEX,
 #                     0.62,
@@ -712,13 +669,41 @@
 #                         cv2.LINE_AA,
 #                     )
 
-#                 cv2.imshow("Capture (OpenCV)", disp)
+#                 btn_h = 60
+#                 btn_w_capture = 220
+#                 btn_w_exit = 140
+#                 btn_y1 = h - btn_h - 20
+#                 btn_y2 = h - 20
+#                 btn_capture = (20, btn_y1, 20 + btn_w_capture, btn_y2)
+#                 btn_exit = (20 + btn_w_capture + 20, btn_y1, 20 + btn_w_capture + 20 + btn_w_exit, btn_y2)
+
+#                 if args.events:
+#                     draw_button(disp, btn_capture, "CAPTURAR", (0, 180, 0), (255, 255, 255))
+#                 draw_button(disp, btn_exit, "SALIR", (50, 50, 200), (255, 255, 255))
+
+#                 cv2.setMouseCallback(
+#                     window_name,
+#                     on_mouse,
+#                     {
+#                         "rect_capture": btn_capture,
+#                         "rect_exit": btn_exit,
+#                         "events_enabled": bool(args.events),
+#                     },
+#                 )
+
+#                 cv2.imshow(window_name, disp)
 #                 key = cv2.waitKey(1) & 0xFF
 
-#                 if key == ord("q"):
+#                 do_quit = (key == ord("q")) or (touch_action == "quit")
+#                 do_save = (key == ord("s"))
+#                 do_capture = ((key == ord("e")) or (touch_action == "capture")) and args.events
+
+#                 touch_action = None
+
+#                 if do_quit:
 #                     break
 
-#                 if key == ord("s"):
+#                 if do_save:
 #                     epoch_ms = int(time.time() * 1000)
 #                     fp = frame_dir / f"manual_{idx:06d}_{epoch_ms}.jpg"
 #                     cv2.imwrite(str(fp), frame)
@@ -726,7 +711,7 @@
 #                     manual_saved += 1
 #                     print(f"[INFO] Guardado manual: {fp}")
 
-#                 if key == ord("e") and args.events:
+#                 if do_capture:
 #                     event_id += 1
 
 #                     burst_n = max(1, int(args.manual_burst))
@@ -808,14 +793,52 @@ from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import cv2
+import platform
+import ctypes
+from ctypes import wintypes
 
 
 def open_camera(device: int, width: int, height: int, fps: int) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(device, cv2.CAP_AVFOUNDATION)  # macOS: AVFoundation
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
-    cap.set(cv2.CAP_PROP_FPS, int(fps))
-    return cap
+    system = platform.system()
+
+    # Orden de backends por sistema
+    if system == "Windows":
+        candidates = [
+            ("DSHOW", cv2.CAP_DSHOW),
+            ("MSMF", cv2.CAP_MSMF),
+            ("DEFAULT", None),
+        ]
+    elif system == "Darwin":  # macOS
+        candidates = [
+            ("AVFOUNDATION", cv2.CAP_AVFOUNDATION),
+            ("DEFAULT", None),
+        ]
+    else:  # Linux / otros
+        candidates = [
+            ("DEFAULT", None),
+        ]
+
+    for backend_name, backend in candidates:
+        if backend is None:
+            cap = cv2.VideoCapture(device)
+        else:
+            cap = cv2.VideoCapture(device, backend)
+
+        if cap is not None and cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+            cap.set(cv2.CAP_PROP_FPS, int(fps))
+
+            # Revalidamos después de setear propiedades
+            ok, frame = cap.read()
+            if ok and frame is not None and frame.size > 0:
+                print(f"[INFO] Cámara abierta con backend: {backend_name}")
+                return cap
+
+            cap.release()
+
+    # Si nada funcionó, devolvemos un capture inválido
+    return cv2.VideoCapture()
 
 
 def warmup_read(cap: cv2.VideoCapture, tries: int = 60, sleep_s: float = 0.03):
@@ -897,6 +920,16 @@ def frame_record(idx: int, frame, epoch_ms: int) -> Dict[str, Any]:
         "epoch_ms": int(epoch_ms),
         "frame": frame.copy(),
     }
+
+
+def fit_size(src_w: int, src_h: int, max_w: int, max_h: int) -> Tuple[int, int, float]:
+    if src_w <= 0 or src_h <= 0:
+        return max_w, max_h, 1.0
+
+    scale = min(max_w / src_w, max_h / src_h, 1.0)
+    out_w = max(1, int(round(src_w * scale)))
+    out_h = max(1, int(round(src_h * scale)))
+    return out_w, out_h, scale
 
 
 def save_burst_frames(
@@ -1094,6 +1127,154 @@ def draw_button(
     ty = y1 + max(th + 8, (y2 - y1 + th) // 2)
     cv2.putText(img, text, (tx, ty), font, scale, text_color, thick, cv2.LINE_AA)
 
+def _find_window_by_title_contains(title_substring: str):
+    if platform.system() != "Windows":
+        return None
+
+    user32 = ctypes.windll.user32
+    found = []
+
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+    def enum_proc(hwnd, lParam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+
+        buff = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buff, length + 1)
+        title = buff.value or ""
+
+        if title_substring.lower() in title.lower():
+            found.append(hwnd)
+            return False
+
+        return True
+
+    user32.EnumWindows(EnumWindowsProc(enum_proc), 0)
+    return found[0] if found else None
+
+
+def bring_window_to_front_strong(window_name: str) -> bool:
+    """
+    Intenta traer la ventana OpenCV al frente de forma más agresiva en Windows.
+    Devuelve True si encontró la ventana; False si no.
+    """
+    if platform.system() != "Windows":
+        return False
+
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = _find_window_by_title_contains(window_name)
+        if not hwnd:
+            return False
+
+        SW_RESTORE = 9
+        SW_SHOW = 5
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_SHOWWINDOW = 0x0040
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.ShowWindow(hwnd, SW_SHOW)
+
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+        user32.SetWindowPos(
+            hwnd,
+            HWND_NOTOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+
+        try:
+            user32.BringWindowToTop(hwnd)
+        except Exception:
+            pass
+
+        try:
+            user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
+        try:
+            user32.SetActiveWindow(hwnd)
+        except Exception:
+            pass
+
+        try:
+            user32.SetFocus(hwnd)
+        except Exception:
+            pass
+
+        return True
+
+    except Exception:
+        return False
+
+def bring_window_to_front(window_name: str) -> None:
+    """
+    Intenta traer la ventana de OpenCV al frente en Windows.
+    En otros sistemas no hace nada.
+    """
+    if platform.system() != "Windows":
+        return
+
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+
+        hwnd = user32.FindWindowW(None, window_name)
+        if not hwnd:
+            return
+
+        SW_RESTORE = 9
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_SHOWWINDOW = 0x0040
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+        user32.SetWindowPos(
+            hwnd,
+            HWND_NOTOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+        user32.SetForegroundWindow(hwnd)
+
+    except Exception:
+        # Si falla, seguimos normal sin romper el flujo.
+        pass
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -1107,6 +1288,8 @@ def main() -> None:
     ap.add_argument("--every", type=int, default=0, help="Guarda 1 frame cada N frames (0 desactiva)")
     ap.add_argument("--no_display", action="store_true", help="Headless. Cortar con Ctrl+C.")
     ap.add_argument("--fps_window", type=int, default=30)
+    ap.add_argument("--preview_max_w", type=int, default=1280, help="Ancho máximo de preview en pantalla")
+    ap.add_argument("--preview_max_h", type=int, default=720, help="Alto máximo de preview en pantalla")
 
     # Eventos
     ap.add_argument("--events", action="store_true", help="Guarda eventos (frame+event.json)")
@@ -1186,7 +1369,10 @@ def main() -> None:
 
     cap = open_camera(args.device, args.width, args.height, args.fps)
     if not cap.isOpened():
-        raise SystemExit(f"No pude abrir cámara device={args.device}. Prueba --device 1/2 y permisos.")
+        raise SystemExit(
+            f"No pude abrir cámara device={args.device}. "
+            "En Windows se intentó DSHOW/MSMF/DEFAULT; revisa permisos y que la cámara no esté ocupada."
+        )
 
     ok, frame = warmup_read(cap)
     if not ok:
@@ -1243,6 +1429,8 @@ def main() -> None:
             "auto_use_window_capture": False,
             "auto_window_s": float(args.auto_window_s),
             "auto_interval_s": float(args.auto_interval_s),
+            "preview_max_w": int(args.preview_max_w),
+            "preview_max_h": int(args.preview_max_h),
         },
         "events": {
             "enabled": bool(args.events),
@@ -1336,17 +1524,31 @@ def main() -> None:
         if event != cv2.EVENT_LBUTTONDOWN:
             return
 
+        scale = float(param["scale"])
+        real_x = int(round(x / scale))
+        real_y = int(round(y / scale))
+
         rect_capture = param["rect_capture"]
         rect_exit = param["rect_exit"]
         events_enabled = param["events_enabled"]
 
-        if events_enabled and point_in_rect(x, y, rect_capture):
+        if events_enabled and point_in_rect(real_x, real_y, rect_capture):
             touch_action = "capture"
-        elif point_in_rect(x, y, rect_exit):
+        elif point_in_rect(real_x, real_y, rect_exit):
             touch_action = "quit"
 
     if not args.no_display:
-        cv2.namedWindow(window_name)
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, min(args.preview_max_w, w), min(args.preview_max_h, h))
+        cv2.waitKey(1)
+
+        focus_window_pending = True
+        focus_window_attempts = 0
+        max_focus_window_attempts = 40
+    else:
+        focus_window_pending = False
+        focus_window_attempts = 0
+        max_focus_window_attempts = 0
 
     try:
         while True:
@@ -1386,11 +1588,16 @@ def main() -> None:
             if not args.no_display:
                 disp = frame.copy()
 
+                preview_w, preview_h, preview_scale = fit_size(
+                    w, h, args.preview_max_w, args.preview_max_h
+                )
+
+                fps_txt = f"{fps_real:.1f}" if fps_real is not None else "..."
+
                 if roi is not None:
                     x, y, rw, rh = roi
                     cv2.rectangle(disp, (x, y), (x + rw, y + rh), (0, 255, 255), 2)
 
-                fps_txt = f"{fps_real:.1f}" if fps_real is not None else "..."
                 cv2.putText(
                     disp,
                     f"MVP MANUAL | device={args.device} {w}x{h} idx={idx} saved={saved} fps={fps_txt}",
@@ -1428,14 +1635,21 @@ def main() -> None:
                 btn_h = 60
                 btn_w_capture = 220
                 btn_w_exit = 140
-                btn_y1 = h - btn_h - 20
-                btn_y2 = h - 20
+                margin = 20
+
+                btn_y1 = h - btn_h - margin
+                btn_y2 = h - margin
                 btn_capture = (20, btn_y1, 20 + btn_w_capture, btn_y2)
                 btn_exit = (20 + btn_w_capture + 20, btn_y1, 20 + btn_w_capture + 20 + btn_w_exit, btn_y2)
 
                 if args.events:
                     draw_button(disp, btn_capture, "CAPTURAR", (0, 180, 0), (255, 255, 255))
                 draw_button(disp, btn_exit, "SALIR", (50, 50, 200), (255, 255, 255))
+
+                if preview_scale < 1.0:
+                    disp_show = cv2.resize(disp, (preview_w, preview_h), interpolation=cv2.INTER_AREA)
+                else:
+                    disp_show = disp
 
                 cv2.setMouseCallback(
                     window_name,
@@ -1444,10 +1658,23 @@ def main() -> None:
                         "rect_capture": btn_capture,
                         "rect_exit": btn_exit,
                         "events_enabled": bool(args.events),
+                        "scale": preview_scale,
                     },
                 )
 
-                cv2.imshow(window_name, disp)
+                cv2.imshow(window_name, disp_show)
+                
+                if focus_window_pending:
+                    found = bring_window_to_front_strong(window_name)
+                    focus_window_attempts += 1
+
+                    # seguimos insistiendo varios frames, porque a veces OpenCV crea/actualiza
+                    # la ventana unos instantes después del primer imshow
+                    if found and focus_window_attempts >= 10:
+                        focus_window_pending = False
+                    elif focus_window_attempts >= max_focus_window_attempts:
+                        focus_window_pending = False
+                
                 key = cv2.waitKey(1) & 0xFF
 
                 do_quit = (key == ord("q")) or (touch_action == "quit")
