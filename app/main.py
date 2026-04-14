@@ -2379,9 +2379,24 @@ def run_closure_iterative(
     )
 
     # Si la sesión ya traía shipping resuelto, lo respetamos
-    if session.target_shipping and session.shipping_resolution_status == "resolved_unique":
+    # if session.target_shipping and session.shipping_resolution_status == "resolved_unique":
+    #     shipping_resolution = {
+    #         "status": "resolved_unique",
+    #         "target_shipping": session.target_shipping,
+    #         "target_ruta": session.target_ruta,
+    #         "target_sku": session.target_sku,
+    #         "target_shipping_expected_units": session.target_shipping_expected_units,
+    #         "resolved_from_barcode": session.resolved_from_barcode,
+    #         "resolved_candidates": [],
+    #     }
+    
+    # Si la sesión ya traía shipping resuelto, lo respetamos
+    if session.target_shipping and session.shipping_resolution_status in (
+        "resolved_unique",
+        "resolved_from_picking_sheet",
+    ):
         shipping_resolution = {
-            "status": "resolved_unique",
+            "status": session.shipping_resolution_status,
             "target_shipping": session.target_shipping,
             "target_ruta": session.target_ruta,
             "target_sku": session.target_sku,
@@ -2424,8 +2439,14 @@ def run_closure_iterative(
     )
 
     # 4) Criterio real de cierre de sesión
+    # target_shipping_complete = (
+    #     session.shipping_resolution_status == "resolved_unique"
+    #     and session.target_shipping is not None
+    #     and session.target_shipping_expected_units > 0
+    #     and session.target_shipping_observed_units >= session.target_shipping_expected_units
+    # )
     target_shipping_complete = (
-        session.shipping_resolution_status == "resolved_unique"
+        session.shipping_resolution_status in ("resolved_unique", "resolved_from_picking_sheet")
         and session.target_shipping is not None
         and session.target_shipping_expected_units > 0
         and session.target_shipping_observed_units >= session.target_shipping_expected_units
@@ -2545,6 +2566,235 @@ def run_closure_iterative(
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if closure_result.get("status") == "success" else 2
 
+def run_picking_shipping(
+    *,
+    picking_image: Path,
+    summary_json: Optional[Path] = None,
+    session_state_json: Optional[Path] = None,
+    output_path: Optional[Path] = None,
+    env_file: str = ".env",
+    reset_session: bool = False,
+) -> int:
+    try:
+        from utils.vision_picking import read_picking_shipping, PickingSheetConfig
+    except Exception as e:
+        print(f"[ERROR] No pude importar utils.vision_picking: {e}")
+        return 2
+    
+    import cv2
+
+    if not picking_image.exists():
+        print(f"[ERROR] No existe picking_image: {picking_image}")
+        return 2
+
+    summary_payload: Dict[str, Any] = {}
+    if summary_json is not None:
+        if not summary_json.exists():
+            print(f"[ERROR] No existe summary_json: {summary_json}")
+            return 2
+
+        summary_payload = safe_read_json(summary_json) or {}
+        if not summary_payload:
+            print(f"[ERROR] No pude leer summary_json: {summary_json}")
+            return 2
+
+    img = cv2.imread(str(picking_image))
+    if img is None:
+        print(f"[ERROR] No se pudo cargar la imagen: {picking_image}")
+        return 2
+
+    cfg = PickingSheetConfig(
+        dynamsoft_env_file=env_file,
+    )
+
+    print("[INFO] Ejecutando lectura de hoja de picking")
+    print(f"[INFO] picking_image: {picking_image}")
+    if summary_json:
+        print(f"[INFO] summary_json: {summary_json}")
+    if session_state_json:
+        print(f"[INFO] session_state_json: {session_state_json}")
+
+    picking_result = read_picking_shipping(img, cfg=cfg)
+
+    session = ClosureSession(
+        summary_payload=summary_payload,
+        state_path=session_state_json,
+        summary_json_path=summary_json,
+    )
+
+    if reset_session:
+        print("[INFO] Reiniciando sesión antes de registrar hoja de picking")
+        session.clear()
+
+    detected_shipping = picking_result.get("shipping")
+    detected_source = picking_result.get("source")
+
+    resolution_status = "not_found"
+    if detected_shipping:
+        resolution_status = "resolved_from_picking_sheet"
+
+    session.set_target_shipping_resolution(
+        status=resolution_status,
+        target_shipping=detected_shipping,
+        target_ruta=None,
+        target_sku=None,
+        target_shipping_expected_units=0,
+        target_shipping_observed_units=0,
+        resolved_from_barcode=None,
+    )
+    session.save()
+
+    payload = {
+        "status": "success" if detected_shipping else "not_found",
+        "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "mode_app": "picking_shipping",
+        "picking_image": str(picking_image),
+        "summary_json": str(summary_json) if summary_json else None,
+        "session_state_json": str(session_state_json) if session_state_json else None,
+        "shipping_result": picking_result,
+        "session": {
+            "session_id": session.session_id,
+            "session_status": session.session_status,
+            "shipping_resolution_status": session.shipping_resolution_status,
+            "target_shipping": session.target_shipping,
+            "target_ruta": session.target_ruta,
+            "target_sku": session.target_sku,
+            "target_shipping_expected_units": session.target_shipping_expected_units,
+            "target_shipping_observed_units": session.target_shipping_observed_units,
+        },
+        "event_context": {
+            "detected_shipping": detected_shipping,
+            "detected_source": detected_source,
+            "sheet_found": picking_result.get("sheet_found"),
+        },
+    }
+
+    if output_path is None:
+        output_dir = Path("data/picking")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{picking_image.stem}_picking_shipping.json"
+
+    safe_write_json(output_path, payload)
+
+    print(f"[OK] Resultado picking_shipping guardado en: {output_path}")
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if detected_shipping else 2
+
+def run_picking_flow(
+    *,
+    picking_image: Path,
+    picking_excel: Optional[Path] = None,
+    packstructure_excel: Optional[Path] = None,
+    summary_json: Optional[Path] = None,
+    readout_json: Optional[Path] = None,
+    detected_barcodes_json: Optional[Path] = None,
+    manual_barcodes: Optional[str] = None,
+    session_state_json: Optional[Path] = None,
+    closure_output: Optional[Path] = None,
+    env_file: str = ".env",
+    reset_session: bool = False,
+) -> int:
+    """
+    Flujo completo:
+    1) Construye o reutiliza summary FillRate + PackStructure
+    2) Lee hoja de picking y resuelve shipping objetivo
+    3) Ejecuta cierre iterativo usando ese shipping ya fijado en sesión
+    """
+
+    if not picking_image.exists():
+        print(f"[ERROR] No existe picking_image: {picking_image}")
+        return 2
+
+    if (
+        readout_json is None
+        and detected_barcodes_json is None
+        and not manual_barcodes
+    ):
+        print("[ERROR] Para picking_flow debes indicar --readout_json, --detected_barcodes_json o --manual_barcodes")
+        return 2
+
+    # ------------------------------------------------------------
+    # Paso 1: obtener summary_json
+    # ------------------------------------------------------------
+    effective_summary_json: Path
+
+    if summary_json is not None:
+        effective_summary_json = summary_json
+        if not effective_summary_json.exists():
+            print(f"[ERROR] No existe summary_json: {effective_summary_json}")
+            return 2
+        print(f"[INFO] Reutilizando summary_json existente: {effective_summary_json}")
+    else:
+        if picking_excel is None:
+            print("[ERROR] Para picking_flow sin --summary_json debes indicar --picking_excel")
+            return 2
+        if packstructure_excel is None:
+            print("[ERROR] Para picking_flow sin --summary_json debes indicar --packstructure_excel")
+            return 2
+        if not picking_excel.exists():
+            print(f"[ERROR] No existe picking_excel: {picking_excel}")
+            return 2
+        if not packstructure_excel.exists():
+            print(f"[ERROR] No existe packstructure_excel: {packstructure_excel}")
+            return 2
+
+        summary_dir = Path("data/picking/summary_fillRate_packStructure")
+        summary_dir.mkdir(parents=True, exist_ok=True)
+        effective_summary_json = summary_dir / f"{picking_excel.stem}_summary_fillRate_packStructure.json"
+
+        rc_summary = run_picking_match(
+            picking_image=picking_image,
+            picking_excel=picking_excel,
+            packstructure_excel=packstructure_excel,
+            output_path=effective_summary_json,
+        )
+        if rc_summary != 0:
+            print("[ERROR] Falló run_picking_match dentro de picking_flow")
+            return rc_summary
+
+    # ------------------------------------------------------------
+    # Paso 2: resolver shipping desde hoja de picking
+    # ------------------------------------------------------------
+    shipping_output_dir = Path("data/picking")
+    shipping_output_dir.mkdir(parents=True, exist_ok=True)
+    shipping_output = shipping_output_dir / f"{picking_image.stem}_picking_shipping.json"
+
+    rc_shipping = run_picking_shipping(
+        picking_image=picking_image,
+        summary_json=effective_summary_json,
+        session_state_json=session_state_json,
+        output_path=shipping_output,
+        env_file=env_file,
+        reset_session=reset_session,
+    )
+    if rc_shipping != 0:
+        print("[ERROR] Falló run_picking_shipping dentro de picking_flow")
+        return rc_shipping
+
+    # ------------------------------------------------------------
+    # Paso 3: ejecutar cierre iterativo usando la misma sesión
+    # ------------------------------------------------------------
+    rc_closure = run_closure_iterative(
+        summary_json=effective_summary_json,
+        readout_json=readout_json,
+        detected_barcodes_json=detected_barcodes_json,
+        manual_barcodes=manual_barcodes,
+        session_state_json=session_state_json,
+        output_path=closure_output,
+        reset_session=False,  # ya se aplicó antes, si correspondía
+    )
+    if rc_closure != 0:
+        print("[ERROR] Falló run_closure_iterative dentro de picking_flow")
+        return rc_closure
+
+    print("[OK] Flujo completo picking_flow ejecutado correctamente")
+    print(f"[OK] summary_json: {effective_summary_json}")
+    print(f"[OK] picking_shipping_json: {shipping_output}")
+    if closure_output is not None:
+        print(f"[OK] closure_output: {closure_output}")
+
+    return 0
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(
@@ -2554,7 +2804,7 @@ def main() -> None:
     ap.add_argument(
         "--mode_app",
         type=str,
-        choices=["readout", "picking_match", "closure_match", "closure_iterative"],
+        choices=["readout", "picking_match", "closure_match", "closure_iterative", "picking_shipping", "picking_flow"],
         default="readout",
         help="Flujo de aplicación principal.",
     )
@@ -2675,6 +2925,60 @@ def main() -> None:
             manual_barcodes=args.manual_barcodes,
             session_state_json=Path(args.session_state_json) if args.session_state_json else None,
             output_path=Path(args.closure_output) if args.closure_output else DEFAULT_CLOSURE_ITERATIVE_OUTPUT_JSON,
+            reset_session=args.reset_session,
+        )
+        raise SystemExit(rc)
+    
+    if args.mode_app == "picking_shipping":
+        if not args.picking_image:
+            print("[ERROR] Para --mode_app picking_shipping debes indicar --picking_image")
+            raise SystemExit(2)
+        
+        rc = run_picking_shipping(
+            picking_image=Path(args.picking_image),
+            summary_json=Path(args.summary_json) if args.summary_json else None,
+            session_state_json=Path(args.session_state_json) if args.session_state_json else None,
+            output_path=Path(args.closure_output) if args.closure_output else None,
+            env_file=".env",
+            reset_session=args.reset_session,
+        )
+        raise SystemExit(rc)
+    
+    # if args.mode_app == "picking_shipping":
+    #     print("[INFO] Modo picking_shipping aún no implementado.")
+    #     raise SystemExit(0)
+    
+    if args.mode_app == "picking_flow":
+        if not args.picking_image:
+            print("[ERROR] Para --mode_app picking_flow debes indicar --picking_image")
+            raise SystemExit(2)
+
+        if (
+            not args.summary_json
+            and not args.picking_excel
+        ):
+            print("[ERROR] Para --mode_app picking_flow debes indicar --summary_json o --picking_excel")
+            raise SystemExit(2)
+
+        if (
+            not args.readout_json
+            and not args.detected_barcodes_json
+            and not args.manual_barcodes
+        ):
+            print("[ERROR] Para --mode_app picking_flow debes indicar --readout_json, --detected_barcodes_json o --manual_barcodes")
+            raise SystemExit(2)
+
+        rc = run_picking_flow(
+            picking_image=Path(args.picking_image),
+            picking_excel=Path(args.picking_excel) if args.picking_excel else None,
+            packstructure_excel=Path(args.packstructure_excel) if args.packstructure_excel else None,
+            summary_json=Path(args.summary_json) if args.summary_json else None,
+            readout_json=Path(args.readout_json) if args.readout_json else None,
+            detected_barcodes_json=Path(args.detected_barcodes_json) if args.detected_barcodes_json else None,
+            manual_barcodes=args.manual_barcodes,
+            session_state_json=Path(args.session_state_json) if args.session_state_json else None,
+            closure_output=Path(args.closure_output) if args.closure_output else DEFAULT_CLOSURE_ITERATIVE_OUTPUT_JSON,
+            env_file=".env",
             reset_session=args.reset_session,
         )
         raise SystemExit(rc)

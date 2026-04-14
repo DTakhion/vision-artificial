@@ -122,13 +122,37 @@ python -m utils.vision_readout_hybrid \
   --save-json
 ```
 
-## scripts/test_yolo_barcode.py
+## tests/test_yolo_barcode.py
 
 # imagen especifica; 
-python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png
+``` bash
+python -m tests.test_yolo_barcode data/tests_picking/capture_barcode_test.png
+```
+# con visualizacion
 
-# visualizacion
-python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png --save_vis
+``` bash
+python -m tests.test_yolo_barcode data/tests_picking/capture_barcode_test.png --save_vis
+```
+
+# detección (genérica de cajas);
+``` bash
+python -m scripts.test_yolo_barcode \
+  data/captures/opencv/frames_20260407_145240/events/event_000001/frames/frame_02.jpg \
+  --mode box \
+  --save_vis \
+  --save_crops
+```
+
+# deteccion usando el modelo generico y clases genericas;
+
+``` bash
+python -m scripts.test_yolo_barcode \
+  data/captures/opencv/frames_20260407_145240/events/event_000001/frames/frame_02.jpg \
+  --mode box \
+  --box_classes box,package,parcel \
+  --save_vis
+```
+
 
 # con ajuste de umbrales
 python -m scripts.test_yolo_barcode data/captures/opencv/frames_20260402_102513/events/event_000001/frames/frame_03.jpg \
@@ -148,12 +172,33 @@ python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png 
   --save_crops
 
 ## utils/vision_barcode_dynamsoft.py
+
+``` bash
 python -m utils.vision_barcode_dynamsoft \
-  data/tests_picking/capture_barcode_test.png \
+  data/captures/opencv/frames_20260402_105555/events/event_000003/frames/frame_03.jpg \
+  --json \
   --save-vis \
-  --out results/capture_barcode_test_dynamsoft.png \
+  --out results/dynamsoft/test_vis.png \
   --save-json \
-  --json-out results/capture_barcode_test_dynamsoft.json
+  --json-out results/dynamsoft/test.json
+```
 
 # Levantar Backend; 
 ## uvicorn backend.main:app --reload
+
+# utils/vision_picking.py
+``` bash
+python -m utils.vision_picking data/tests_picking/tu_imagen.jpg --json --save-debug
+```
+# tests/test_vision_picking.py
+python -m tests.test_vision_picking data/tests_picking/frame_08.jpg
+
+# app/main.py -> picking_shipping
+``` bash
+ python -m app.main \
+  --mode_app picking_shipping \
+  --picking_image data/captures/opencv/frames_20260402_105555/events/event_000004/frames/frame_01.jpg \                                 
+  --session_state_json data/closure/session_state.json \      
+  --closure_output data/picking/frame_03_picking_shipping.json
+```
+

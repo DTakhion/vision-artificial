@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Callable, Tuple, Optional
+from typing import List, Dict, Any, Callable, Tuple, Optional, Sequence
 
 import math
 
@@ -15,6 +15,7 @@ from ultralytics import YOLO
 # Modelo YOLO
 # ------------------------------------------------------------------
 DEFAULT_MODEL_PATH = "runs/detect/runs_kuehne_nagel/barcode_v1/weights/best.pt"
+DEFAULT_BOX_MODEL_PATH = "yolov8n.pt"
 
 _MODEL_CACHE: Dict[str, YOLO] = {}
 
@@ -133,6 +134,17 @@ def _basic_text_validation(text: str) -> bool:
         return False
 
     return True
+
+
+def _normalize_target_class_names(
+    target_class_names: Optional[Sequence[str]],
+) -> Optional[set[str]]:
+    """
+    Normaliza nombres de clase objetivo a minúsculas.
+    """
+    if not target_class_names:
+        return None
+    return {str(x).strip().lower() for x in target_class_names if str(x).strip()}
 
 
 # ------------------------------------------------------------------
@@ -830,22 +842,24 @@ def _dedupe_and_rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 # ------------------------------------------------------------------
-# Detección de ROIs
+# Detección genérica de ROIs
 # ------------------------------------------------------------------
-def detect_barcode_rois_yolo(
+def detect_rois_yolo(
     img_bgr: np.ndarray,
     model_path: str = DEFAULT_MODEL_PATH,
-    conf: float = 0.10, #0.25
+    conf: float = 0.10,
     iou: float = 0.45,
     max_det: int = 10,
-    min_size: int = 20, #40
+    min_size: int = 20,
+    target_class_ids: Optional[Sequence[int]] = None,
+    target_class_names: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Detecta ROIs candidatas de códigos de barra usando YOLO.
+    Detección genérica de ROIs usando YOLO.
 
-    Importante:
-    - Este método SOLO detecta regiones candidatas.
-    - La decodificación ocurre después, en detect_and_decode_with_yolo().
+    Permite filtrar opcionalmente por:
+    - IDs de clase
+    - nombres de clase
     """
     if img_bgr is None or not isinstance(img_bgr, np.ndarray):
         return []
@@ -855,6 +869,9 @@ def detect_barcode_rois_yolo(
 
     model = load_yolo_model(model_path)
     img_h, img_w = img_bgr.shape[:2]
+
+    class_ids_set = set(target_class_ids) if target_class_ids else None
+    class_names_set = _normalize_target_class_names(target_class_names)
 
     results = model.predict(
         source=img_bgr,
@@ -871,6 +888,10 @@ def detect_barcode_rois_yolo(
         if boxes is None or len(boxes) == 0:
             continue
 
+        names_map = getattr(r, "names", None)
+        if names_map is None:
+            names_map = getattr(model, "names", None)
+
         for b in boxes:
             x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
             x1, y1, x2, y2 = _clip_bbox_xyxy(x1, y1, x2, y2, img_w, img_h)
@@ -884,18 +905,99 @@ def detect_barcode_rois_yolo(
             cls = int(b.cls[0]) if b.cls is not None else -1
             conf_score = float(b.conf[0]) if b.conf is not None else 0.0
 
+            class_name = None
+            try:
+                if isinstance(names_map, dict):
+                    class_name = names_map.get(cls)
+                elif isinstance(names_map, list) and 0 <= cls < len(names_map):
+                    class_name = names_map[cls]
+            except Exception:
+                class_name = None
+
+            class_name_norm = str(class_name).strip().lower() if class_name is not None else None
+
+            if class_ids_set is not None and cls not in class_ids_set:
+                continue
+
+            if class_names_set is not None and class_name_norm not in class_names_set:
+                continue
+
             rois.append(
                 {
                     "bbox_xyxy": (x1, y1, x2, y2),
                     "bbox": (x1, y1, w, h),
                     "conf": conf_score,
                     "cls": cls,
+                    "class_name": class_name,
                     "area": w * h,
+                    "model_path": model_path,
                 }
             )
 
     rois.sort(key=lambda r: (r["conf"], r["area"]), reverse=True)
     return rois
+
+
+# ------------------------------------------------------------------
+# Detección de ROIs de barcode
+# ------------------------------------------------------------------
+def detect_barcode_rois_yolo(
+    img_bgr: np.ndarray,
+    model_path: str = DEFAULT_MODEL_PATH,
+    conf: float = 0.10,  # 0.25
+    iou: float = 0.45,
+    max_det: int = 10,
+    min_size: int = 20,  # 40
+) -> List[Dict[str, Any]]:
+    """
+    Detecta ROIs candidatas de códigos de barra usando YOLO.
+
+    Importante:
+    - Este método SOLO detecta regiones candidatas.
+    - La decodificación ocurre después, en detect_and_decode_with_yolo().
+    """
+    return detect_rois_yolo(
+        img_bgr=img_bgr,
+        model_path=model_path,
+        conf=conf,
+        iou=iou,
+        max_det=max_det,
+        min_size=min_size,
+    )
+
+
+# ------------------------------------------------------------------
+# Detección experimental de cajas
+# ------------------------------------------------------------------
+def detect_box_rois_yolo(
+    img_bgr: np.ndarray,
+    model_path: str = DEFAULT_BOX_MODEL_PATH,
+    conf: float = 0.15,
+    iou: float = 0.45,
+    max_det: int = 10,
+    min_size: int = 80,
+    target_class_ids: Optional[Sequence[int]] = None,
+    target_class_names: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Detección experimental de cajas/objetos usando un modelo YOLO genérico.
+
+    Nota:
+    - Por defecto NO filtra por clase, porque el modelo genérico puede no traer
+      una clase "box" explícita.
+    - Puedes pasar target_class_names o target_class_ids si en tus pruebas
+      identificas una clase útil concreta.
+    """
+    return detect_rois_yolo(
+        img_bgr=img_bgr,
+        model_path=model_path,
+        conf=conf,
+        iou=iou,
+        max_det=max_det,
+        min_size=min_size,
+        target_class_ids=target_class_ids,
+        target_class_names=target_class_names,
+    )
 
 
 # ------------------------------------------------------------------
@@ -942,6 +1044,8 @@ def crop_rois(
                 "bbox": r["bbox"],
                 "conf": r["conf"],
                 "cls": r["cls"],
+                "class_name": r.get("class_name"),
+                "model_path": r.get("model_path"),
             }
         )
 
@@ -1042,6 +1146,7 @@ def detect_and_decode_with_yolo(
                     item["yolo_bbox_xyxy_padded"] = crop_info["bbox_xyxy_padded"]
                     item["yolo_conf"] = crop_info["conf"]
                     item["yolo_cls"] = crop_info["cls"]
+                    item["yolo_class_name"] = crop_info.get("class_name")
                     item["yolo_crop_variant"] = variant_name
                     item["yolo_preprocess"] = prep_name
                     item["decoder_backend"] = backend_used
@@ -1067,6 +1172,8 @@ def detect_and_decode_with_yolo(
                 "bbox_xyxy_padded": c["bbox_xyxy_padded"],
                 "conf": c["conf"],
                 "cls": c["cls"],
+                "class_name": c.get("class_name"),
+                "model_path": c.get("model_path"),
             }
             for c in crops
         ],
@@ -1089,11 +1196,20 @@ def draw_yolo_rois(
     for i, r in enumerate(rois):
         x1, y1, x2, y2 = r["bbox_xyxy"]
         conf = r.get("conf", 0.0)
+        class_name = r.get("class_name")
+        cls = r.get("cls", -1)
 
         cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        label = f"roi_{i} conf={conf:.2f}"
+        if class_name:
+            label += f" cls={class_name}"
+        else:
+            label += f" cls={cls}"
+
         cv2.putText(
             vis,
-            f"roi_{i} conf={conf:.2f}",
+            label[:120],
             (x1, max(20, y1 - 8)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,

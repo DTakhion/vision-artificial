@@ -21,7 +21,7 @@ class PreprocessConfig:
     denoise: bool = False
     denoise_h: int = 10
 
-    # ✅ Edge-preserving denoise (great for "dotty" / noisy QR)
+    # Edge-preserving denoise (great for "dotty" / noisy QR)
     bilateral: bool = True
     bilateral_d: int = 9
     bilateral_sigma_color: int = 75
@@ -94,7 +94,7 @@ def preprocess_variants(
     # Base sharpened
     gray_sharp = _unsharp(gray, cfg.sharpen_amount if cfg.sharpen else 0.0)
 
-    # ✅ Bilateral on (typically) the "contrast-normalized" grayscale
+    # Bilateral on (typically) the "contrast-normalized" grayscale
     if cfg.bilateral:
         gray_bilat = cv2.bilateralFilter(
             gray,
@@ -108,7 +108,7 @@ def preprocess_variants(
         gray_bilat = None
         gray_bilat_sharp = None
 
-    # ✅ Morphological close (soft) to close small gaps (careful: can hurt some QRs)
+    # Morphological close (soft) to close small gaps (careful: can hurt some QRs)
     if cfg.morph_close:
         kx, ky = cfg.morph_kernel
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kx, ky))
@@ -143,7 +143,7 @@ def preprocess_variants(
     if bw is not None:
         out["bw"] = bw
 
-    # ✅ Upscale variants (only for selected bases to keep it lightweight)
+    # Upscale variants (only for selected bases to keep it lightweight)
     if cfg.upscale and cfg.upscale_factors:
         for f in cfg.upscale_factors:
             if f <= 1.0:
