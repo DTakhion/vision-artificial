@@ -122,54 +122,20 @@ python -m utils.vision_readout_hybrid \
   --save-json
 ```
 
-## tests/test_yolo_barcode.py
 
-# imagen especifica; 
-``` bash
-python -m tests.test_yolo_barcode data/tests_picking/capture_barcode_test.png
-```
-# con visualizacion
+# utils/vision_barcode_yolo.py con ajuste de umbrales
 
 ``` bash
-python -m tests.test_yolo_barcode data/tests_picking/capture_barcode_test.png --save_vis
-```
-
-# detección (genérica de cajas);
-``` bash
-python -m scripts.test_yolo_barcode \
-  data/captures/opencv/frames_20260407_145240/events/event_000001/frames/frame_02.jpg \
-  --mode box \
-  --save_vis \
-  --save_crops
-```
-
-# deteccion usando el modelo generico y clases genericas;
-
-``` bash
-python -m scripts.test_yolo_barcode \
-  data/captures/opencv/frames_20260407_145240/events/event_000001/frames/frame_02.jpg \
-  --mode box \
-  --box_classes box,package,parcel \
-  --save_vis
-```
-
-
-# con ajuste de umbrales
-python -m scripts.test_yolo_barcode data/captures/opencv/frames_20260402_102513/events/event_000001/frames/frame_03.jpg \
---conf 0.10 \
---pad_ratio 0.25 \
---decoder_mode collect_plus \
---decoder_budget 5000 \
---save_vis \
---save_crops
-
-python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png \
-  --conf 0.10 \
-  --pad_ratio 0.80 \
+python -m utils.vision_barcode_yolo data/captures/opencv/frames_20260407_150039/events/event_000001/frames/frame_01.jpg \
+  --conf 0.30 \
+  --pad_ratio 0.30 \
   --decoder_mode collect_plus \
-  --decoder_budget 5000 \
-  --save_vis \
-  --save_crops
+  --decoder_budget 2000 \
+  --save-vis \
+  --save-json \
+  --save-crops \
+  --debug
+```
 
 ## utils/vision_barcode_dynamsoft.py
 
@@ -190,8 +156,6 @@ python -m utils.vision_barcode_dynamsoft \
 ``` bash
 python -m utils.vision_picking data/tests_picking/tu_imagen.jpg --json --save-debug
 ```
-# tests/test_vision_picking.py
-python -m tests.test_vision_picking data/tests_picking/frame_08.jpg
 
 # app/main.py -> picking_shipping
 ``` bash
