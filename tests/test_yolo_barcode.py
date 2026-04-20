@@ -1,4 +1,4 @@
-# scripts/test_yolo_barcode.py
+# tests/test_yolo_barcode.py
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import cv2
 from utils.vision_barcode_yolo import (
     detect_and_decode_with_yolo,
     detect_barcode_rois_yolo,
+    detect_box_rois_yolo,
     draw_yolo_rois,
     crop_rois,
 )
@@ -68,6 +69,18 @@ def print_backend_summary(result: dict) -> None:
         )
 
 
+def _normalize_class_filter(value: str | None) -> list[str] | None:
+    """
+    Convierte un string tipo 'box,package,parcel' en lista.
+    """
+    if not value:
+        return None
+
+    parts = [x.strip() for x in value.split(",")]
+    parts = [x for x in parts if x]
+    return parts or None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Prueba YOLO + decoder de barcode sobre una imagen"
@@ -79,9 +92,27 @@ def main():
         help="Ruta de la imagen a probar",
     )
     parser.add_argument(
+        "--mode",
+        choices=["barcode", "box"],
+        default="barcode",
+        help="Modo de prueba: barcode (actual) o box (experimental)",
+    )
+    parser.add_argument(
         "--model",
-        default="runs/detect/runs_kuehne_nagel/barcode_v1/weights/best.pt",
-        help="Ruta del modelo YOLO entrenado",
+        default=None,
+        help=(
+            "Ruta del modelo YOLO. "
+            "Si no se indica: barcode -> modelo entrenado actual; "
+            "box -> yolov8n.pt"
+        ),
+    )
+    parser.add_argument(
+        "--box_classes",
+        default=None,
+        help=(
+            "Filtro opcional de clases para modo box, separado por comas. "
+            "Ej: --box_classes box,package"
+        ),
     )
     parser.add_argument(
         "--conf",
@@ -153,48 +184,129 @@ def main():
         print(f"No se pudo cargar la imagen: {image_path}")
         return
 
-    # 1) Detección pura de ROIs
-    rois = detect_barcode_rois_yolo(
+    # Resolver modelo por defecto según modo
+    if args.model:
+        model_path = args.model
+    else:
+        if args.mode == "box":
+            model_path = "yolov8n.pt"
+        else:
+            model_path = "runs/detect/runs_kuehne_nagel/barcode_v1/weights/best.pt"
+
+    # -----------------------------
+    # MODO BARCODE (flujo actual)
+    # -----------------------------
+    if args.mode == "barcode":
+        # 1) Detección pura de ROIs
+        rois = detect_barcode_rois_yolo(
+            img_bgr=img,
+            model_path=model_path,
+            conf=args.conf,
+            iou=args.iou,
+            max_det=args.max_det,
+            min_size=args.min_size,
+        )
+
+        # 1.1) Construcción explícita de crops padded para debug visual
+        crops = crop_rois(
+            img=img,
+            rois=rois,
+            pad_ratio=args.pad_ratio,
+        )
+
+        # 2) Pipeline detección + decodificación
+        result = detect_and_decode_with_yolo(
+            img_bgr=img,
+            decoder_fn=decode_barcode_1d,
+            model_path=model_path,
+            conf=args.conf,
+            iou=args.iou,
+            max_det=args.max_det,
+            min_size=args.min_size,
+            pad_ratio=args.pad_ratio,
+            decoder_mode=args.decoder_mode,
+            decoder_time_budget_ms=args.decoder_budget,
+        )
+
+        print("\n=== MODO ===\n")
+        print("barcode")
+
+        print("\n=== ROIS DETECTADAS ===\n")
+        print(json.dumps(rois, indent=2, ensure_ascii=False))
+
+        print("\n=== RESULTADO DETECCIÓN + DECODIFICACIÓN ===\n")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+        print_backend_summary(result)
+
+        rois_json_path = out_dir / f"{image_stem}_rois.json"
+        result_json_path = out_dir / f"{image_stem}_result.json"
+
+        with open(rois_json_path, "w", encoding="utf-8") as f:
+            json.dump(rois, f, indent=2, ensure_ascii=False)
+
+        with open(result_json_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+
+        print(f"\nROIs guardadas en: {rois_json_path}")
+        print(f"Resultado guardado en: {result_json_path}")
+
+        if args.save_vis:
+            vis = draw_yolo_rois(img, rois)
+            vis_path = out_dir / f"{image_stem}_vis.jpg"
+            cv2.imwrite(str(vis_path), vis)
+            print(f"Visualización guardada en: {vis_path}")
+
+        if args.save_crops:
+            save_crop_variants(
+                crops=crops,
+                out_dir=out_dir,
+                image_stem=image_stem,
+            )
+
+        return
+
+    # -----------------------------
+    # MODO BOX (experimental)
+    # -----------------------------
+    target_class_names = _normalize_class_filter(args.box_classes)
+
+    rois = detect_box_rois_yolo(
         img_bgr=img,
-        model_path=args.model,
+        model_path=model_path,
         conf=args.conf,
         iou=args.iou,
         max_det=args.max_det,
         min_size=args.min_size,
+        target_class_names=target_class_names,
     )
 
-    # 1.1) Construcción explícita de crops padded para debug visual
     crops = crop_rois(
         img=img,
         rois=rois,
         pad_ratio=args.pad_ratio,
     )
 
-    # 2) Pipeline detección + decodificación
-    result = detect_and_decode_with_yolo(
-        img_bgr=img,
-        decoder_fn=decode_barcode_1d,
-        model_path=args.model,
-        conf=args.conf,
-        iou=args.iou,
-        max_det=args.max_det,
-        min_size=args.min_size,
-        pad_ratio=args.pad_ratio,
-        decoder_mode=args.decoder_mode,
-        decoder_time_budget_ms=args.decoder_budget,
-    )
+    result = {
+        "status": "success" if rois else "no_rois",
+        "mode": "box",
+        "model_path": model_path,
+        "target_class_names": target_class_names,
+        "total_rois": len(rois),
+        "rois": rois,
+    }
 
-    print("\n=== ROIS DETECTADAS ===\n")
+    print("\n=== MODO ===\n")
+    print("box")
+
+    print("\n=== ROIS DETECTADAS (CAJAS / OBJETOS) ===\n")
     print(json.dumps(rois, indent=2, ensure_ascii=False))
 
-    print("\n=== RESULTADO DETECCIÓN + DECODIFICACIÓN ===\n")
+    print("\n=== RESULTADO DETECCIÓN ===\n")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
-    print_backend_summary(result)
-
-    # Guardar JSONs
-    rois_json_path = out_dir / f"{image_stem}_rois.json"
-    result_json_path = out_dir / f"{image_stem}_result.json"
+    rois_json_path = out_dir / f"{image_stem}_box_rois.json"
+    result_json_path = out_dir / f"{image_stem}_box_result.json"
 
     with open(rois_json_path, "w", encoding="utf-8") as f:
         json.dump(rois, f, indent=2, ensure_ascii=False)
@@ -205,14 +317,12 @@ def main():
     print(f"\nROIs guardadas en: {rois_json_path}")
     print(f"Resultado guardado en: {result_json_path}")
 
-    # Guardar visualización opcional
     if args.save_vis:
         vis = draw_yolo_rois(img, rois)
-        vis_path = out_dir / f"{image_stem}_vis.jpg"
+        vis_path = out_dir / f"{image_stem}_box_vis.jpg"
         cv2.imwrite(str(vis_path), vis)
         print(f"Visualización guardada en: {vis_path}")
 
-    # Guardar crops padded y rotaciones
     if args.save_crops:
         save_crop_variants(
             crops=crops,

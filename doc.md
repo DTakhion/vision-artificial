@@ -15,6 +15,13 @@ while true; do
 done
 ```
 
+# levantar backend/main.py con uvicorn y entorno virtual 
+
+``` bash
+python -m uvicorn backend.main:app --reload
+```
+
+
 ## paso 3; Cierre (app/main.py function clousure_match/clousure_iterative)
 ``` bash
 python -m app.main \
@@ -122,38 +129,47 @@ python -m utils.vision_readout_hybrid \
   --save-json
 ```
 
-## scripts/test_yolo_barcode.py
 
-# imagen especifica; 
-python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png
+# utils/vision_barcode_yolo.py con ajuste de umbrales
 
-# visualizacion
-python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png --save_vis
-
-# con ajuste de umbrales
-python -m scripts.test_yolo_barcode data/captures/opencv/frames_20260402_102513/events/event_000001/frames/frame_03.jpg \
---conf 0.10 \
---pad_ratio 0.25 \
---decoder_mode collect_plus \
---decoder_budget 5000 \
---save_vis \
---save_crops
-
-python -m scripts.test_yolo_barcode data/tests_picking/capture_barcode_test.png \
-  --conf 0.10 \
-  --pad_ratio 0.80 \
+``` bash
+python -m utils.vision_barcode_yolo data/captures/opencv/frames_20260407_150039/events/event_000001/frames/frame_01.jpg \
+  --conf 0.30 \
+  --pad_ratio 0.30 \
   --decoder_mode collect_plus \
-  --decoder_budget 5000 \
-  --save_vis \
-  --save_crops
+  --decoder_budget 2000 \
+  --save-vis \
+  --save-json \
+  --save-crops \
+  --debug
+```
 
 ## utils/vision_barcode_dynamsoft.py
+
+``` bash
 python -m utils.vision_barcode_dynamsoft \
-  data/tests_picking/capture_barcode_test.png \
+  data/captures/opencv/frames_20260402_105555/events/event_000003/frames/frame_03.jpg \
+  --json \
   --save-vis \
-  --out results/capture_barcode_test_dynamsoft.png \
+  --out results/dynamsoft/test_vis.png \
   --save-json \
-  --json-out results/capture_barcode_test_dynamsoft.json
+  --json-out results/dynamsoft/test.json
+```
 
 # Levantar Backend; 
 ## uvicorn backend.main:app --reload
+
+# utils/vision_picking.py
+``` bash
+python -m utils.vision_picking data/tests_picking/tu_imagen.jpg --json --save-debug
+```
+
+# app/main.py -> picking_shipping
+``` bash
+ python -m app.main \
+  --mode_app picking_shipping \
+  --picking_image data/captures/opencv/frames_20260402_105555/events/event_000004/frames/frame_01.jpg \                                 
+  --session_state_json data/closure/session_state.json \      
+  --closure_output data/picking/frame_03_picking_shipping.json
+```
+

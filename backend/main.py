@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -31,12 +30,15 @@ app.add_middleware(
 # ============================================================
 BASE_DIR = Path(__file__).resolve().parent.parent  # vision-artificial/
 CAPTURE_SCRIPT_PATH = BASE_DIR / "scripts" / "capture_opencv.py"
-APP_MAIN_PATH = BASE_DIR / "app" / "main.py"
 
 CAPTURES_DIR = BASE_DIR / "data" / "captures" / "opencv"
 CLOSURE_DIR = BASE_DIR / "data" / "closure"
+PICKING_DIR = BASE_DIR / "data" / "picking"
+SUMMARY_DIR = PICKING_DIR / "summary_fillRate_packStructure"
 
 DEFAULT_SESSION_STATE_JSON = CLOSURE_DIR / "session_state_latest.json"
+DEFAULT_PICKING_EXCEL = BASE_DIR / "data" / "fillrate" / "latest" / "fillrate_latest.xlsx"
+DEFAULT_PACKSTRUCTURE_EXCEL = BASE_DIR / "data" / "tests_picking" / "PackStructure.xlsx"
 
 app.mount("/data", StaticFiles(directory=BASE_DIR / "data"), name="data")
 
@@ -46,6 +48,12 @@ app.mount("/data", StaticFiles(directory=BASE_DIR / "data"), name="data")
 # ============================================================
 class ProcessRequest(BaseModel):
     event_dir: Optional[str] = None
+    picking_image: Optional[str] = None
+    picking_excel: Optional[str] = None
+    packstructure_excel: Optional[str] = None
+    summary_json: Optional[str] = None
+    session_state_json: Optional[str] = None
+    reset_session: bool = False
 
 
 # ============================================================
@@ -80,6 +88,16 @@ def run_subprocess(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
     )
+
+
+def normalize_input_path(path_str: Optional[str]) -> Optional[Path]:
+    if not path_str:
+        return None
+
+    p = Path(path_str)
+    if not p.is_absolute():
+        p = (BASE_DIR / p).resolve()
+    return p
 
 
 def get_latest_session_dir() -> Path:
@@ -142,6 +160,7 @@ def resolve_target_frame(event_dir: Path) -> Path:
     candidates = [
         event_dir / "frame.jpg",
         event_dir / "roi.jpg",
+        event_dir / "frames" / "frame_01.jpg",
         event_dir / "frames" / "frame_02.jpg",
         event_dir / "frames" / "frame_03.jpg",
     ]
@@ -165,12 +184,70 @@ def build_capture_response(event_dir: Path) -> Dict[str, Any]:
     return {
         "event_dir": str(event_dir),
         "event_json": str(event_json_path) if event_json_path.exists() else None,
+        "event_json_url": path_to_data_url(event_json_path) if event_json_path.exists() else None,
         "frame_path": str(frame_path),
         "frame_url": path_to_data_url(frame_path),
         "readout_json": str(readout_json_path) if readout_json_path.exists() else None,
         "readout_json_url": path_to_data_url(readout_json_path) if readout_json_path.exists() else None,
         "readout_vis": str(readout_vis_path) if readout_vis_path.exists() else None,
         "readout_vis_url": path_to_data_url(readout_vis_path) if readout_vis_path.exists() else None,
+    }
+
+
+def build_process_response(
+    *,
+    event_dir: Path,
+    box_frame_path: Path,
+    picking_image_path: Optional[Path],
+    readout_json_path: Path,
+    readout_vis_path: Path,
+    summary_json_path: Path,
+    picking_shipping_json_path: Path,
+    closure_output_path: Path,
+    session_state_json_path: Path,
+) -> Dict[str, Any]:
+    closure_payload = safe_read_json(closure_output_path) or {}
+    shipping_payload = safe_read_json(picking_shipping_json_path) or {}
+    session_payload = safe_read_json(session_state_json_path) or {}
+
+    frontend_summary = closure_payload.get("frontend_summary")
+    operator_feedback = closure_payload.get("operator_feedback")
+    closure_result = closure_payload.get("closure_result")
+    closure_session = closure_payload.get("session")
+
+    shipping_result = shipping_payload.get("shipping_result")
+    shipping_session = shipping_payload.get("session")
+    shipping_event_context = shipping_payload.get("event_context")
+
+    return {
+        "status": "success",
+        "message": "Captura procesada correctamente",
+        "event": {
+            "event_dir": str(event_dir),
+            "frame_path": str(box_frame_path),
+            "frame_url": path_to_data_url(box_frame_path),
+            "picking_image_path": str(picking_image_path) if picking_image_path else None,
+            "picking_image_url": path_to_data_url(picking_image_path) if picking_image_path else None,
+            "readout_json": str(readout_json_path) if readout_json_path.exists() else None,
+            "readout_json_url": path_to_data_url(readout_json_path) if readout_json_path.exists() else None,
+            "readout_vis": str(readout_vis_path) if readout_vis_path.exists() else None,
+            "readout_vis_url": path_to_data_url(readout_vis_path) if readout_vis_path.exists() else None,
+            "summary_json": str(summary_json_path) if summary_json_path.exists() else None,
+            "summary_json_url": path_to_data_url(summary_json_path) if summary_json_path.exists() else None,
+            "picking_shipping_json": str(picking_shipping_json_path) if picking_shipping_json_path.exists() else None,
+            "picking_shipping_json_url": path_to_data_url(picking_shipping_json_path) if picking_shipping_json_path.exists() else None,
+            "closure_output": str(closure_output_path) if closure_output_path.exists() else None,
+            "closure_output_url": path_to_data_url(closure_output_path) if closure_output_path.exists() else None,
+        },
+        "session_state_json": str(session_state_json_path) if session_state_json_path.exists() else None,
+        "session_state_json_url": path_to_data_url(session_state_json_path) if session_state_json_path.exists() else None,
+        "shipping_result": shipping_result,
+        "shipping_session": shipping_session,
+        "shipping_event_context": shipping_event_context,
+        "frontend_summary": frontend_summary,
+        "operator_feedback": operator_feedback,
+        "session": closure_session if isinstance(closure_session, dict) else session_payload,
+        "closure_result": closure_result,
     }
 
 
@@ -250,29 +327,54 @@ def capture():
 @app.post("/vision/process")
 def process_capture(payload: ProcessRequest):
     """
-    Procesa una captura concreta:
-    1) readout híbrido sobre el frame del evento
-    2) closure_iterative con el readout generado
+    Procesa una captura concreta con el flujo nuevo:
+    1) readout híbrido sobre la imagen de caja del evento
+    2) picking_flow usando la imagen de hoja de picking si fue enviada,
+       o la misma imagen del evento como fallback
     """
     try:
         event_dir = resolve_event_dir(payload.event_dir)
-        frame_path = resolve_target_frame(event_dir)
+
+        # Imagen de caja: SIEMPRE viene del evento que se quiere procesar
+        box_frame_path = resolve_target_frame(event_dir)
+        if not box_frame_path.exists():
+            raise HTTPException(status_code=404, detail=f"No existe frame de caja: {box_frame_path}")
+
+        # Imagen de hoja de picking: opcional desde frontend
+        picking_image_path = normalize_input_path(payload.picking_image)
+        effective_picking_image_path = picking_image_path if picking_image_path else box_frame_path
+
+        if not effective_picking_image_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No existe picking_image: {effective_picking_image_path}",
+            )
+
+        picking_excel_path = normalize_input_path(payload.picking_excel) or DEFAULT_PICKING_EXCEL
+        packstructure_excel_path = normalize_input_path(payload.packstructure_excel) or DEFAULT_PACKSTRUCTURE_EXCEL
+        summary_json_path = normalize_input_path(payload.summary_json)
+        session_state_json_path = normalize_input_path(payload.session_state_json) or DEFAULT_SESSION_STATE_JSON
 
         readout_json_path = event_dir / "readout_result.json"
         readout_vis_path = event_dir / "readout_vis.jpg"
-        closure_output_path = event_dir / "closure_iterative_result.json"
+        closure_output_path = event_dir / "picking_flow_result.json"
+        picking_shipping_json_path = PICKING_DIR / f"{effective_picking_image_path.stem}_picking_shipping.json"
+
+        if summary_json_path is None:
+            summary_json_path = SUMMARY_DIR / f"{picking_excel_path.stem}_summary_fillRate_packStructure.json"
 
         print(f"[INFO] Procesando evento: {event_dir}")
-        print(f"[INFO] Frame objetivo: {frame_path}")
+        print(f"[INFO] Imagen caja (readout): {box_frame_path}")
+        print(f"[INFO] Imagen hoja picking (picking_flow): {effective_picking_image_path}")
 
         # --------------------------------------------------------
-        # 1) Readout híbrido
+        # 1) Readout híbrido SOLO sobre imagen de caja
         # --------------------------------------------------------
         readout_cmd = [
             sys.executable,
             "-m",
             "utils.vision_readout_hybrid",
-            str(frame_path),
+            str(box_frame_path),
             "--save-json",
             "--json-out",
             str(readout_json_path),
@@ -301,68 +403,71 @@ def process_capture(payload: ProcessRequest):
             )
 
         # --------------------------------------------------------
-        # 2) Closure iterative
+        # 2) Picking flow usando imagen de hoja picking
         # --------------------------------------------------------
-        closure_cmd = [
+        flow_cmd = [
             sys.executable,
             "-m",
             "app.main",
             "--mode_app",
-            "closure_iterative",
+            "picking_flow",
+            "--picking_image",
+            str(effective_picking_image_path),
             "--readout_json",
             str(readout_json_path),
             "--session_state_json",
-            str(DEFAULT_SESSION_STATE_JSON),
+            str(session_state_json_path),
             "--closure_output",
             str(closure_output_path),
         ]
 
-        closure_proc = run_subprocess(closure_cmd, cwd=BASE_DIR)
+        if summary_json_path.exists():
+            flow_cmd.extend(["--summary_json", str(summary_json_path)])
+        else:
+            flow_cmd.extend(
+                [
+                    "--picking_excel",
+                    str(picking_excel_path),
+                    "--packstructure_excel",
+                    str(packstructure_excel_path),
+                ]
+            )
 
-        if closure_proc.returncode != 0:
+        if payload.reset_session:
+            flow_cmd.append("--reset_session")
+
+        flow_proc = run_subprocess(flow_cmd, cwd=BASE_DIR)
+
+        if flow_proc.returncode != 0:
             raise HTTPException(
                 status_code=500,
                 detail={
-                    "message": "Falló closure_iterative",
-                    "stdout": closure_proc.stdout,
-                    "stderr": closure_proc.stderr,
-                    "cmd": closure_cmd,
+                    "message": "Falló picking_flow",
+                    "stdout": flow_proc.stdout,
+                    "stderr": flow_proc.stderr,
+                    "cmd": flow_cmd,
                 },
             )
 
-        closure_payload = safe_read_json(closure_output_path)
-        if not closure_payload:
+        if not closure_output_path.exists():
             raise HTTPException(
                 status_code=500,
-                detail="closure_iterative terminó, pero no se pudo leer el JSON de salida",
+                detail="picking_flow terminó, pero no se generó el closure_output esperado",
             )
 
-        frontend_summary = closure_payload.get("frontend_summary")
-        operator_feedback = closure_payload.get("operator_feedback")
-        session_payload = closure_payload.get("session")
-        closure_result = closure_payload.get("closure_result")
+        response_payload = build_process_response(
+            event_dir=event_dir,
+            box_frame_path=box_frame_path,
+            picking_image_path=effective_picking_image_path,
+            readout_json_path=readout_json_path,
+            readout_vis_path=readout_vis_path,
+            summary_json_path=summary_json_path,
+            picking_shipping_json_path=picking_shipping_json_path,
+            closure_output_path=closure_output_path,
+            session_state_json_path=session_state_json_path,
+        )
 
-        return {
-            "status": "success",
-            "message": "Captura procesada correctamente",
-            "event": {
-                "event_dir": str(event_dir),
-                "frame_path": str(frame_path),
-                "frame_url": path_to_data_url(frame_path),
-                "readout_json": str(readout_json_path),
-                "readout_json_url": path_to_data_url(readout_json_path),
-                "readout_vis": str(readout_vis_path) if readout_vis_path.exists() else None,
-                "readout_vis_url": path_to_data_url(readout_vis_path) if readout_vis_path.exists() else None,
-                "closure_output": str(closure_output_path),
-                "closure_output_url": path_to_data_url(closure_output_path),
-            },
-            "session_state_json": str(DEFAULT_SESSION_STATE_JSON),
-            "session_state_json_url": path_to_data_url(DEFAULT_SESSION_STATE_JSON),
-            "frontend_summary": frontend_summary,
-            "operator_feedback": operator_feedback,
-            "session": session_payload,
-            "closure_result": closure_result,
-        }
+        return response_payload
 
     except HTTPException:
         raise

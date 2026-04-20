@@ -1,4 +1,4 @@
-# utils/test_dynamsoft.py
+# tests/test_dynamsoft.py
 
 import argparse
 import os

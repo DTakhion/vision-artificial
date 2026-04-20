@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Callable, Tuple, Optional
-
-import math
+from typing import Any, Callable, Dict, List
 
 import cv2
 import numpy as np
@@ -135,6 +133,14 @@ def _basic_text_validation(text: str) -> bool:
     return True
 
 
+def _debug_print(enabled: bool, message: str) -> None:
+    """
+    Imprime sólo si debug está activado.
+    """
+    if enabled:
+        print(message)
+
+
 # ------------------------------------------------------------------
 # Geometría: orientación y deskew
 # ------------------------------------------------------------------
@@ -152,20 +158,20 @@ def _rotate_image_bound(
     h, w = img.shape[:2]
     center = (w / 2.0, h / 2.0)
 
-    M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+    matrix = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
 
-    cos = abs(M[0, 0])
-    sin = abs(M[0, 1])
+    cos = abs(matrix[0, 0])
+    sin = abs(matrix[0, 1])
 
     new_w = int((h * sin) + (w * cos))
     new_h = int((h * cos) + (w * sin))
 
-    M[0, 2] += (new_w / 2.0) - center[0]
-    M[1, 2] += (new_h / 2.0) - center[1]
+    matrix[0, 2] += (new_w / 2.0) - center[0]
+    matrix[1, 2] += (new_h / 2.0) - center[1]
 
     return cv2.warpAffine(
         img,
-        M,
+        matrix,
         (new_w, new_h),
         flags=cv2.INTER_CUBIC,
         borderMode=cv2.BORDER_CONSTANT,
@@ -191,7 +197,6 @@ def _estimate_barcode_angle(gray: np.ndarray) -> float:
         magnitude = cv2.magnitude(grad_x, grad_y)
         angle = cv2.phase(grad_x, grad_y, angleInDegrees=True)
 
-        # Consideramos píxeles con gradiente suficientemente fuerte
         thr = np.percentile(magnitude, 80)
         mask = magnitude > thr
 
@@ -200,13 +205,9 @@ def _estimate_barcode_angle(gray: np.ndarray) -> float:
 
         angles = angle[mask]
 
-        # En barcode 1D, el gradiente fuerte suele ser perpendicular a las barras.
-        # Ajustamos para buscar alineación de barras.
         candidate_angles = []
         for a in angles:
-            # Convertir a rango [-90, 90)
             aa = ((float(a) + 90.0) % 180.0) - 90.0
-            # La dirección de barras es perpendicular al gradiente
             bar_angle = aa - 90.0
             if bar_angle < -90.0:
                 bar_angle += 180.0
@@ -217,7 +218,6 @@ def _estimate_barcode_angle(gray: np.ndarray) -> float:
         candidate_angles = np.asarray(candidate_angles, dtype=np.float32)
         median_angle = float(np.median(candidate_angles))
 
-        # Normalizar hacia algo razonable
         if median_angle < -45.0:
             median_angle += 90.0
         elif median_angle > 45.0:
@@ -247,8 +247,7 @@ def _compute_projection_score(gray: np.ndarray) -> float:
             return -1.0
 
         diff = np.abs(np.diff(proj))
-        score = float(diff.mean() + diff.std())
-        return score
+        return float(diff.mean() + diff.std())
     except Exception:
         return -1.0
 
@@ -272,12 +271,10 @@ def _autodeskew_barcode(
 
     variants: List[tuple[str, np.ndarray]] = []
 
-    # Variante con ángulo estimado directo
     if abs(est) > 0.3:
         rotated_est = _rotate_image_bound(img, -est, border_value=255)
         variants.append((f"deskew_est_{est:.2f}", rotated_est))
 
-    # Barrido fino alrededor del estimado
     center_angle = max(-coarse_limit, min(coarse_limit, est))
     candidates = np.arange(
         center_angle - coarse_step,
@@ -288,15 +285,15 @@ def _autodeskew_barcode(
 
     scored: List[tuple[float, float, np.ndarray]] = []
 
-    for a in candidates:
-        rotated = _rotate_image_bound(img, -float(a), border_value=255)
+    for angle in candidates:
+        rotated = _rotate_image_bound(img, -float(angle), border_value=255)
         score = _compute_projection_score(_to_gray(rotated))
-        scored.append((score, float(a), rotated))
+        scored.append((score, float(angle), rotated))
 
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    for idx, (_, a, rotated) in enumerate(scored[:3]):
-        variants.append((f"deskew_top{idx+1}_{a:.2f}", rotated))
+    for idx, (_, angle, rotated) in enumerate(scored[:3]):
+        variants.append((f"deskew_top{idx + 1}_{angle:.2f}", rotated))
 
     return variants
 
@@ -347,8 +344,8 @@ def refine_barcode_region(gray: np.ndarray) -> np.ndarray:
         best = None
         best_score = -1.0
 
-        for c in contours:
-            x, y, ww, hh = cv2.boundingRect(c)
+        for contour in contours:
+            x, y, ww, hh = cv2.boundingRect(contour)
             area = ww * hh
             if area < 0.02 * (w * h):
                 continue
@@ -366,7 +363,6 @@ def refine_barcode_region(gray: np.ndarray) -> np.ndarray:
 
         x, y, ww, hh = best
 
-        # Padding generoso para no matar quiet zones
         pad_x = int(round(ww * 0.18))
         pad_y = int(round(hh * 0.25))
 
@@ -394,24 +390,20 @@ def _build_crop_variants(crop: np.ndarray) -> List[tuple[str, np.ndarray]]:
     variants: List[tuple[str, np.ndarray]] = [("orig", crop)]
 
     try:
-        rot90 = cv2.rotate(crop, cv2.ROTATE_90_CLOCKWISE)
-        variants.append(("rot90", rot90))
+        variants.append(("rot90", cv2.rotate(crop, cv2.ROTATE_90_CLOCKWISE)))
     except Exception:
         pass
 
     try:
-        rot270 = cv2.rotate(crop, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        variants.append(("rot270", rot270))
+        variants.append(("rot270", cv2.rotate(crop, cv2.ROTATE_90_COUNTERCLOCKWISE)))
     except Exception:
         pass
 
-    # Deskew sobre el original
     try:
         variants.extend(_autodeskew_barcode(crop))
     except Exception:
         pass
 
-    # Deskew también sobre rotaciones de 90/270 si existieran
     for name, img_var in list(variants[:]):
         if name in {"rot90", "rot270"}:
             try:
@@ -421,7 +413,6 @@ def _build_crop_variants(crop: np.ndarray) -> List[tuple[str, np.ndarray]]:
             except Exception:
                 pass
 
-    # Deduplicación simple por nombre
     out: List[tuple[str, np.ndarray]] = []
     seen = set()
     for name, img_var in variants:
@@ -446,40 +437,29 @@ def _preprocess_for_barcode(img: np.ndarray) -> List[tuple[str, np.ndarray]]:
     if img is None or img.size == 0:
         return []
 
-    variants: List[tuple[str, np.ndarray]] = []
+    variants: List[tuple[str, np.ndarray]] = [("orig", img)]
 
-    # 1) original
-    variants.append(("orig", img))
-
-    # 2) gray base
     gray = _to_gray(img)
     variants.append(("gray", gray))
 
-    # 3) gray normalizado
     gray_norm = _normalize_contrast(gray)
     variants.append(("gray_norm", gray_norm))
 
-    # 4) upscale suave
     gray_up2 = _safe_resize(gray_norm, 2.0)
-    variants.append(("gray_up2", gray_up2))
-
     gray_up3 = _safe_resize(gray_norm, 3.0)
+    variants.append(("gray_up2", gray_up2))
     variants.append(("gray_up3", gray_up3))
 
-    # 5) sharpen suave
     sharp_up2 = _light_sharpen(gray_up2)
-    variants.append(("sharp_up2", sharp_up2))
-
     sharp_up3 = _light_sharpen(gray_up3)
+    variants.append(("sharp_up2", sharp_up2))
     variants.append(("sharp_up3", sharp_up3))
 
-    # 6) otsu sobre una variante suave
     _, otsu_up2 = cv2.threshold(
         sharp_up2, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
     variants.append(("otsu_up2", otsu_up2))
 
-    # 7) adaptive sólo una vez, no excesivo
     adaptive_up2 = cv2.adaptiveThreshold(
         sharp_up2,
         255,
@@ -490,7 +470,6 @@ def _preprocess_for_barcode(img: np.ndarray) -> List[tuple[str, np.ndarray]]:
     )
     variants.append(("adaptive_up2", adaptive_up2))
 
-    # 8) refine_barcode_region como variante OPCIONAL, no obligatoria
     try:
         refined = refine_barcode_region(gray_norm)
         if refined is not None and refined.size > 0:
@@ -509,16 +488,15 @@ def _preprocess_for_barcode(img: np.ndarray) -> List[tuple[str, np.ndarray]]:
     except Exception:
         pass
 
-    # Deduplicación simple por nombre
     out: List[tuple[str, np.ndarray]] = []
     seen = set()
-    for name, v in variants:
+    for name, value in variants:
         if name in seen:
             continue
-        if v is None or v.size == 0:
+        if value is None or value.size == 0:
             continue
         seen.add(name)
-        out.append((name, v))
+        out.append((name, value))
 
     return out
 
@@ -541,11 +519,7 @@ def _opencv_barcode_fallback(img: np.ndarray) -> Dict[str, Any]:
             }
 
         img_for_detector = _ensure_bgr(img)
-
         detector = cv2.barcode.BarcodeDetector()
-
-        # Algunas builds tienen detectAndDecodeWithType, otras no.
-        # Intentamos primero la variante más informativa.
         items: List[Dict[str, Any]] = []
 
         if hasattr(detector, "detectAndDecodeWithType"):
@@ -560,12 +534,12 @@ def _opencv_barcode_fallback(img: np.ndarray) -> Dict[str, Any]:
                 if decoded_type is None or not isinstance(decoded_type, (list, tuple)):
                     decoded_type = [decoded_type] * len(decoded_info)
 
-                for i, text in enumerate(decoded_info):
+                for idx, text in enumerate(decoded_info):
                     text = (text or "").strip()
                     if not text or not _basic_text_validation(text):
                         continue
 
-                    fmt = decoded_type[i] if i < len(decoded_type) else None
+                    fmt = decoded_type[idx] if idx < len(decoded_type) else None
                     item: Dict[str, Any] = {
                         "text": text,
                         "format": fmt,
@@ -576,7 +550,7 @@ def _opencv_barcode_fallback(img: np.ndarray) -> Dict[str, Any]:
 
                     if points is not None:
                         try:
-                            pts = points[i] if len(points) > i else points
+                            pts = points[idx] if len(points) > idx else points
                             item["meta"]["points"] = np.asarray(pts).tolist()
                         except Exception:
                             pass
@@ -589,7 +563,6 @@ def _opencv_barcode_fallback(img: np.ndarray) -> Dict[str, Any]:
                         "items": items,
                     }
 
-        # Fallback más compatible
         ok, decoded_info, decoded_type, points = detector.detectAndDecode(
             img_for_detector
         )
@@ -601,12 +574,12 @@ def _opencv_barcode_fallback(img: np.ndarray) -> Dict[str, Any]:
             if decoded_type is None or not isinstance(decoded_type, (list, tuple)):
                 decoded_type = [decoded_type] * len(decoded_info)
 
-            for i, text in enumerate(decoded_info):
+            for idx, text in enumerate(decoded_info):
                 text = (text or "").strip()
                 if not text or not _basic_text_validation(text):
                     continue
 
-                fmt = decoded_type[i] if i < len(decoded_type) else None
+                fmt = decoded_type[idx] if idx < len(decoded_type) else None
                 item = {
                     "text": text,
                     "format": fmt,
@@ -617,7 +590,7 @@ def _opencv_barcode_fallback(img: np.ndarray) -> Dict[str, Any]:
 
                 if points is not None:
                     try:
-                        pts = points[i] if len(points) > i else points
+                        pts = points[idx] if len(points) > idx else points
                         item["meta"]["points"] = np.asarray(pts).tolist()
                     except Exception:
                         pass
@@ -686,10 +659,10 @@ def _decode_barcode_hybrid(
     items_primary = result_primary.get("items", []) or []
     valid_primary = []
 
-    for it in items_primary:
-        text = str(it.get("text", "")).strip()
+    for item in items_primary:
+        text = str(item.get("text", "")).strip()
         if _basic_text_validation(text):
-            valid_primary.append(it)
+            valid_primary.append(item)
 
     if valid_primary:
         return {
@@ -703,10 +676,10 @@ def _decode_barcode_hybrid(
     items_fallback = result_fallback.get("items", []) or []
 
     valid_fallback = []
-    for it in items_fallback:
-        text = str(it.get("text", "")).strip()
+    for item in items_fallback:
+        text = str(item.get("text", "")).strip()
         if _basic_text_validation(text):
-            valid_fallback.append(it)
+            valid_fallback.append(item)
 
     if valid_fallback:
         return {
@@ -745,23 +718,15 @@ def _score_decoded_item(
         return -1.0
 
     score = 0.0
-
-    # Base por longitud razonable
     score += min(len(text), 24) * 0.15
-
-    # Más dígitos suele ser buena señal en 1D industriales
     score += sum(ch.isdigit() for ch in text) * 0.08
-
-    # Confianza YOLO
     score += float(yolo_conf) * 2.0
 
-    # Backend
     if backend == "primary_decoder":
         score += 1.0
     elif backend == "opencv_barcode":
         score += 0.6
 
-    # Variantes preferidas
     preferred_preps = {
         "gray",
         "gray_norm",
@@ -822,7 +787,6 @@ def _dedupe_and_rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         reverse=True,
     )
 
-    # limpiar campo interno
     for item in ranked:
         item.pop("_candidate_score", None)
 
@@ -835,10 +799,10 @@ def _dedupe_and_rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def detect_barcode_rois_yolo(
     img_bgr: np.ndarray,
     model_path: str = DEFAULT_MODEL_PATH,
-    conf: float = 0.10, #0.25
+    conf: float = 0.10,
     iou: float = 0.45,
     max_det: int = 10,
-    min_size: int = 20, #40
+    min_size: int = 20,
 ) -> List[Dict[str, Any]]:
     """
     Detecta ROIs candidatas de códigos de barra usando YOLO.
@@ -866,13 +830,13 @@ def detect_barcode_rois_yolo(
 
     rois: List[Dict[str, Any]] = []
 
-    for r in results:
-        boxes = r.boxes
+    for result in results:
+        boxes = result.boxes
         if boxes is None or len(boxes) == 0:
             continue
 
-        for b in boxes:
-            x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
+        for box in boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
             x1, y1, x2, y2 = _clip_bbox_xyxy(x1, y1, x2, y2, img_w, img_h)
 
             w = x2 - x1
@@ -881,8 +845,8 @@ def detect_barcode_rois_yolo(
             if w < min_size or h < min_size:
                 continue
 
-            cls = int(b.cls[0]) if b.cls is not None else -1
-            conf_score = float(b.conf[0]) if b.conf is not None else 0.0
+            cls = int(box.cls[0]) if box.cls is not None else -1
+            conf_score = float(box.conf[0]) if box.conf is not None else 0.0
 
             rois.append(
                 {
@@ -908,9 +872,6 @@ def crop_rois(
 ) -> List[Dict[str, Any]]:
     """
     Recorta ROIs con padding y retorna metadata útil.
-
-    Ajuste:
-    - padding algo más generoso para proteger quiet zones.
     """
     if img is None or img.size == 0:
         return []
@@ -918,8 +879,8 @@ def crop_rois(
     img_h, img_w = img.shape[:2]
     out: List[Dict[str, Any]] = []
 
-    for i, r in enumerate(rois):
-        x, y, ww, hh = r["bbox"]
+    for idx, roi in enumerate(rois):
+        x, y, ww, hh = roi["bbox"]
 
         pad_x = int(max(4, round(ww * pad_ratio)))
         pad_y = int(max(4, round(hh * (pad_ratio * 0.75))))
@@ -936,12 +897,12 @@ def crop_rois(
         out.append(
             {
                 "crop": crop,
-                "roi_index": i,
+                "roi_index": idx,
                 "bbox_xyxy_padded": (x0, y0, x1, y1),
-                "bbox_xyxy_original": r["bbox_xyxy"],
-                "bbox": r["bbox"],
-                "conf": r["conf"],
-                "cls": r["cls"],
+                "bbox_xyxy_original": roi["bbox_xyxy"],
+                "bbox": roi["bbox"],
+                "conf": roi["conf"],
+                "cls": roi["cls"],
             }
         )
 
@@ -962,6 +923,7 @@ def detect_and_decode_with_yolo(
     pad_ratio: float = 0.15,
     decoder_mode: str = "collect",
     decoder_time_budget_ms: int = 800,
+    debug: bool = False,
 ) -> Dict[str, Any]:
     """
     Pipeline completo:
@@ -1008,13 +970,17 @@ def detect_and_decode_with_yolo(
         crop_variants = _build_crop_variants(crop)
 
         for variant_name, crop_variant in crop_variants:
-            print(f"[YOLO ROI {roi_index}] probando orientación: {variant_name}")
+            _debug_print(
+                debug,
+                f"[YOLO ROI {roi_index}] probando orientación: {variant_name}",
+            )
 
             preprocessed_list = _preprocess_for_barcode(crop_variant)
 
             for prep_name, prep_img in preprocessed_list:
-                print(
-                    f"[YOLO ROI {roi_index}] orientación={variant_name} preprocess={prep_name}"
+                _debug_print(
+                    debug,
+                    f"[YOLO ROI {roi_index}] orientación={variant_name} preprocess={prep_name}",
                 )
 
                 hybrid_result = _decode_barcode_hybrid(
@@ -1030,12 +996,12 @@ def detect_and_decode_with_yolo(
 
                 backend_used = hybrid_result.get("backend", "unknown")
 
-                for it in items:
-                    text = str(it.get("text", "")).strip()
+                for decoded_item in items:
+                    text = str(decoded_item.get("text", "")).strip()
                     if not _basic_text_validation(text):
                         continue
 
-                    item = dict(it)
+                    item = dict(decoded_item)
                     item["source"] = f"yolo_roi_{roi_index}"
                     item["yolo_roi_index"] = roi_index
                     item["yolo_bbox_xyxy_original"] = crop_info["bbox_xyxy_original"]
@@ -1062,13 +1028,13 @@ def detect_and_decode_with_yolo(
         "items": final_items,
         "rois": [
             {
-                "roi_index": c["roi_index"],
-                "bbox_xyxy_original": c["bbox_xyxy_original"],
-                "bbox_xyxy_padded": c["bbox_xyxy_padded"],
-                "conf": c["conf"],
-                "cls": c["cls"],
+                "roi_index": crop_info["roi_index"],
+                "bbox_xyxy_original": crop_info["bbox_xyxy_original"],
+                "bbox_xyxy_padded": crop_info["bbox_xyxy_padded"],
+                "conf": crop_info["conf"],
+                "cls": crop_info["cls"],
             }
-            for c in crops
+            for crop_info in crops
         ],
     }
 
@@ -1086,14 +1052,14 @@ def draw_yolo_rois(
     """
     vis = img_bgr.copy()
 
-    for i, r in enumerate(rois):
-        x1, y1, x2, y2 = r["bbox_xyxy"]
-        conf = r.get("conf", 0.0)
+    for idx, roi in enumerate(rois):
+        x1, y1, x2, y2 = roi["bbox_xyxy"]
+        conf = roi.get("conf", 0.0)
 
         cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cv2.putText(
             vis,
-            f"roi_{i} conf={conf:.2f}",
+            f"roi_{idx} conf={conf:.2f}",
             (x1, max(20, y1 - 8)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
@@ -1103,3 +1069,336 @@ def draw_yolo_rois(
         )
 
     return vis
+
+def _json_default(obj):
+    """
+    Serializador seguro para numpy / tuples / Path-like en JSON.
+    """
+    try:
+        import numpy as _np
+
+        if isinstance(obj, (_np.integer,)):
+            return int(obj)
+        if isinstance(obj, (_np.floating,)):
+            return float(obj)
+        if isinstance(obj, _np.ndarray):
+            return obj.tolist()
+    except Exception:
+        pass
+
+    if isinstance(obj, tuple):
+        return list(obj)
+
+    return str(obj)
+
+
+def _resolve_decoder_fn() -> Callable[..., Dict[str, Any]] | None:
+    """
+    Intenta resolver una función de decodificación del proyecto sin acoplarse
+    rígidamente a un solo módulo.
+
+    Busca funciones típicas en módulos conocidos del proyecto.
+    """
+    candidates = [
+        ("utils.vision_readout_hybrid", [
+            "decode_barcode_hybrid",
+            "decode_barcodes_hybrid",
+            "decode_with_hybrid",
+            "read_barcode_hybrid",
+        ]),
+        ("utils.vision_barcode_dynamsoft", [
+            "decode_barcode_dynamsoft",
+            "decode_barcode",
+            "decode_barcodes",
+            "read_barcodes",
+        ]),
+    ]
+
+    import importlib
+
+    for module_name, fn_names in candidates:
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+
+        for fn_name in fn_names:
+            fn = getattr(module, fn_name, None)
+            if callable(fn):
+                print(f"[INFO] Decoder encontrado: {module_name}.{fn_name}")
+                return fn
+
+    print("[WARN] No encontré un decoder del proyecto. El CLI seguirá en modo detección-only.")
+    return None
+
+
+def _save_crops_from_rois(
+    img_bgr: np.ndarray,
+    rois: List[Dict[str, Any]],
+    out_dir: Path,
+    image_stem: str,
+    pad_ratio: float,
+) -> List[str]:
+    """
+    Guarda crops padded de las ROIs detectadas.
+    """
+    crops_dir = out_dir / f"{image_stem}_crops"
+    crops_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_paths: List[str] = []
+    crops = crop_rois(img=img_bgr, rois=rois, pad_ratio=pad_ratio)
+
+    for crop_info in crops:
+        roi_index = crop_info["roi_index"]
+        conf = float(crop_info.get("conf", 0.0))
+        crop = crop_info["crop"]
+
+        crop_path = crops_dir / f"{image_stem}_roi_{roi_index:02d}_conf_{conf:.3f}.jpg"
+        ok = cv2.imwrite(str(crop_path), crop)
+        if ok:
+            saved_paths.append(str(crop_path))
+            print(f"[OK] Crop guardado: {crop_path}")
+        else:
+            print(f"[WARN] No se pudo guardar crop: {crop_path}")
+
+    return saved_paths
+
+
+def _draw_yolo_rois_with_top_text(
+    img_bgr: np.ndarray,
+    rois: List[Dict[str, Any]],
+    items: List[Dict[str, Any]] | None = None,
+) -> np.ndarray:
+    """
+    Dibuja ROIs y, si existe, el mejor texto asociado por ROI.
+    """
+    vis = img_bgr.copy()
+
+    top_text_by_roi: Dict[int, str] = {}
+    if items:
+        for item in items:
+            roi_idx = item.get("yolo_roi_index")
+            text = str(item.get("text", "")).strip()
+            if roi_idx is None or not text:
+                continue
+            if roi_idx not in top_text_by_roi:
+                top_text_by_roi[int(roi_idx)] = text
+
+    for idx, roi in enumerate(rois):
+        x1, y1, x2, y2 = roi["bbox_xyxy"]
+        conf = float(roi.get("conf", 0.0))
+
+        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        label = f"roi_{idx} conf={conf:.2f}"
+        if idx in top_text_by_roi:
+            label += f" | {top_text_by_roi[idx][:32]}"
+
+        cv2.putText(
+            vis,
+            label,
+            (x1, max(20, y1 - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+
+    return vis
+
+# ==============================
+# CLI DIRECTO
+# ==============================
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    from pathlib import Path
+
+    import cv2
+
+    parser = argparse.ArgumentParser(
+        description="YOLO Barcode Detection + Decode"
+    )
+
+    parser.add_argument("image", type=str, help="Ruta de la imagen")
+
+    parser.add_argument(
+        "--out-dir",
+        type=str,
+        default="results/test_vision_barcode_yolo",
+        help="Carpeta de salida",
+    )
+
+    parser.add_argument(
+        "--save-vis",
+        action="store_true",
+        help="Guardar imagen anotada con ROIs",
+    )
+    parser.add_argument(
+        "--save-json",
+        action="store_true",
+        help="Guardar JSON resultado",
+    )
+    parser.add_argument(
+        "--save-crops",
+        action="store_true",
+        help="Guardar crops padded de las ROIs detectadas",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Imprimir detalle de variantes geométricas y preprocesos",
+    )
+
+    parser.add_argument("--conf", type=float, default=0.10, help="Confianza YOLO")
+    parser.add_argument("--iou", type=float, default=0.45, help="IOU YOLO")
+    parser.add_argument("--max-det", type=int, default=10, help="Máximo de detecciones")
+    parser.add_argument("--min-size", type=int, default=20, help="Tamaño mínimo de ROI")
+    parser.add_argument(
+        "--pad_ratio",
+        type=float,
+        default=0.80,
+        help="Padding relativo aplicado al crop de la ROI",
+    )
+    parser.add_argument(
+        "--decoder_mode",
+        type=str,
+        default="collect_plus",
+        help="Modo del decoder",
+    )
+    parser.add_argument(
+        "--decoder_budget",
+        type=int,
+        default=5000,
+        help="Presupuesto de tiempo del decoder en ms",
+    )
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default=DEFAULT_MODEL_PATH,
+        help="Ruta del modelo YOLO",
+    )
+    parser.add_argument(
+        "--detect-only",
+        action="store_true",
+        help="Sólo detectar ROIs, sin intentar decode",
+    )
+
+    args = parser.parse_args()
+
+    image_path = Path(args.image)
+    if not image_path.exists():
+        print(f"[ERROR] Imagen no existe: {image_path}")
+        raise SystemExit(1)
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print("[INFO] ===========================================")
+    print("[INFO] vision_barcode_yolo | inicio")
+    print(f"[INFO] Imagen         : {image_path}")
+    print(f"[INFO] Modelo YOLO    : {args.model_path}")
+    print(f"[INFO] Output dir     : {out_dir}")
+    print(f"[INFO] conf/iou       : {args.conf} / {args.iou}")
+    print(f"[INFO] max_det        : {args.max_det}")
+    print(f"[INFO] min_size       : {args.min_size}")
+    print(f"[INFO] pad_ratio      : {args.pad_ratio}")
+    print(f"[INFO] decoder_mode   : {args.decoder_mode}")
+    print(f"[INFO] decoder_budget : {args.decoder_budget} ms")
+    print(f"[INFO] debug          : {args.debug}")
+    print("[INFO] ===========================================")
+
+    print("[INFO] Cargando imagen...")
+    img = cv2.imread(str(image_path))
+    if img is None:
+        print(f"[ERROR] No se pudo leer imagen: {image_path}")
+        raise SystemExit(1)
+
+    print(f"[INFO] Imagen cargada: shape={img.shape}")
+
+    print("[INFO] Ejecutando detección YOLO...")
+    rois = detect_barcode_rois_yolo(
+        img_bgr=img,
+        model_path=args.model_path,
+        conf=args.conf,
+        iou=args.iou,
+        max_det=args.max_det,
+        min_size=args.min_size,
+    )
+
+    print(f"[INFO] Total ROIs detectadas: {len(rois)}")
+
+    if args.save_crops and rois:
+        print("[INFO] Guardando crops de ROIs...")
+        _save_crops_from_rois(
+            img_bgr=img,
+            rois=rois,
+            out_dir=out_dir,
+            image_stem=image_path.stem,
+            pad_ratio=args.pad_ratio,
+        )
+
+    final_result: Dict[str, Any]
+
+    if args.detect_only:
+        print("[INFO] Modo detect-only activado.")
+        final_result = {
+            "status": "success" if rois else "no_rois",
+            "image": str(image_path),
+            "total_rois": len(rois),
+            "rois": rois,
+            "items": [],
+        }
+    else:
+        decoder_fn = _resolve_decoder_fn()
+
+        if decoder_fn is None:
+            final_result = {
+                "status": "success" if rois else "no_rois",
+                "image": str(image_path),
+                "total_rois": len(rois),
+                "rois": rois,
+                "items": [],
+                "warning": "No se encontró decoder_fn. Se ejecutó sólo detección.",
+            }
+        else:
+            print("[INFO] Ejecutando pipeline completo: detect + decode...")
+            final_result = detect_and_decode_with_yolo(
+                img_bgr=img,
+                decoder_fn=decoder_fn,
+                model_path=args.model_path,
+                conf=args.conf,
+                iou=args.iou,
+                max_det=args.max_det,
+                min_size=args.min_size,
+                pad_ratio=args.pad_ratio,
+                decoder_mode=args.decoder_mode,
+                decoder_time_budget_ms=args.decoder_budget,
+                debug=args.debug,
+            )
+            final_result["image"] = str(image_path)
+
+    print("\n=== RESULTADO FINAL ===")
+    print(json.dumps(final_result, indent=2, ensure_ascii=False, default=_json_default))
+
+    if args.save_vis:
+        print("[INFO] Guardando visualización...")
+        vis_items = final_result.get("items", []) or []
+        vis = _draw_yolo_rois_with_top_text(img, rois, vis_items)
+        vis_path = out_dir / f"{image_path.stem}_yolo_decode_vis.jpg"
+        ok = cv2.imwrite(str(vis_path), vis)
+        if ok:
+            print(f"[OK] Imagen guardada: {vis_path}")
+        else:
+            print(f"[WARN] No se pudo guardar imagen: {vis_path}")
+
+    if args.save_json:
+        print("[INFO] Guardando JSON...")
+        json_path = out_dir / f"{image_path.stem}_yolo_decode_result.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(final_result, f, indent=2, ensure_ascii=False, default=_json_default)
+        print(f"[OK] JSON guardado: {json_path}")
+
+    print("[INFO] Proceso finalizado.")
