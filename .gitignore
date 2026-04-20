@@ -95,7 +95,7 @@ datasets/
 
 # ignorar todos los pesos por defecto
 *.pt
-yolov8*.pt
+#yolov8*.pt
 
 # mantener SOLO modelo productivo (opcional)
 !runs/detect/

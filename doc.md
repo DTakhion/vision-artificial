@@ -15,6 +15,13 @@ while true; do
 done
 ```
 
+# levantar backend/main.py con uvicorn y entorno virtual 
+
+``` bash
+python -m uvicorn backend.main:app --reload
+```
+
+
 ## paso 3; Cierre (app/main.py function clousure_match/clousure_iterative)
 ``` bash
 python -m app.main \
