@@ -58,6 +58,26 @@ python -m utils.vision_readout_hybrid \
   --json-out results/output_hybridNew_1.json \
   --vis-out results/output_hybridNew_1.jpg
 ```
+# utils/vision_picking.py
+
+``` bash
+python -m utils.vision_picking \
+  data/tests_picking/frame_03.jpg \
+  --save-json \
+  --save-debug
+```
+# app/main.py -> picking_flow
+``` bash
+python -m app.main \
+  --mode_app picking_flow \
+  --picking_image data/tests_picking/frame_03.jpg \
+  --picking_excel data/fillrate/latest/fillrate_latest.xlsx \
+  --packstructure_excel data/tests_picking/PackStructure.xlsx \
+  --readout_json results/output_readout.json \
+  --session_state_json data/closure/session_state.json \
+  --closure_output data/closure/output.json \
+  --reset_session
+```
 
 ## paso 3; Cierre (app/main.py function clousure_match/clousure_iterative)
 ``` bash
