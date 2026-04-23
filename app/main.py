@@ -1097,8 +1097,24 @@ def run_picking_match(
     save_json(payload, str(output_path))
 
     print(f"[OK] Consolidado guardado en: {output_path}")
-    print(json.dumps(final_summary, ensure_ascii=False, indent=2))
+
+    try:
+        print(json.dumps(final_summary, ensure_ascii=False, indent=2))
+    except UnicodeEncodeError:
+        print(json.dumps(final_summary, ensure_ascii=True, indent=2))
+
     return 0
+
+    #save_json(payload, str(output_path))
+
+    #print(f"[OK] Consolidado guardado en: {output_path}")
+    #print(json.dumps(final_summary, ensure_ascii=False, indent=2))
+    #summary_text = json.dumps(final_summary, ensure_ascii=False, indent=2)
+    #try:
+    #    print(summary_text)
+    #except UnicodeEncodeError:
+    #    print(summary_text.encode("utf-8", errors="replace").decode("utf-8"))
+    #return 0
 
 # def _extract_detected_items_for_frontend(
 #     readout_payload: Optional[Dict[str, Any]],
@@ -1460,7 +1476,13 @@ def run_closure_match(
     safe_write_json(output_path, payload)
 
     print(f"[OK] Cierre guardado en: {output_path}")
-    print(json.dumps(closure_result, ensure_ascii=False, indent=2))
+    #print(json.dumps(closure_result, ensure_ascii=False, indent=2))
+
+    try:
+        print(json.dumps(closure_result, ensure_ascii=False, indent=2))
+    except UnicodeEncodeError:
+        print(json.dumps(closure_result, ensure_ascii=True, indent=2))
+
     return 0 if closure_result.get("status") == "success" else 2
 
 
@@ -2563,7 +2585,13 @@ def run_closure_iterative(
     safe_write_json(output_path, payload)
 
     print(f"[OK] Cierre iterativo guardado en: {output_path}")
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    #print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    try:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    except UnicodeEncodeError:
+        print(json.dumps(payload, ensure_ascii=True, indent=2))
+
     return 0 if closure_result.get("status") == "success" else 2
 
 # def run_picking_shipping(
@@ -2832,13 +2860,19 @@ def run_picking_shipping(
 
     safe_write_json(output_path, payload)
 
+    #print(f"[OK] Resultado picking_shipping guardado en: {output_path}")
     print(f"[OK] Resultado picking_shipping guardado en: {output_path}")
+
     if saved_debug_paths:
         print("[OK] Debug picking guardado en:")
         for s in saved_debug_paths:
             print(f" - {s}")
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    try:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    except UnicodeEncodeError:
+        print(json.dumps(payload, ensure_ascii=True, indent=2))
+
     return 0 if detected_shipping else 2
 
 def run_picking_flow(
@@ -2920,6 +2954,18 @@ def run_picking_flow(
     shipping_output_dir.mkdir(parents=True, exist_ok=True)
     shipping_output = shipping_output_dir / f"{picking_image.stem}_picking_shipping.json"
 
+    #rc_shipping = run_picking_shipping(
+    #    picking_image=picking_image,
+    #    summary_json=effective_summary_json,
+    #    session_state_json=session_state_json,
+    #    output_path=shipping_output,
+    #    env_file=env_file,
+    #    reset_session=reset_session,
+    #)
+    #if rc_shipping != 0:
+    #    print("[ERROR] Falló run_picking_shipping dentro de picking_flow")
+    #    return rc_shipping
+
     rc_shipping = run_picking_shipping(
         picking_image=picking_image,
         summary_json=effective_summary_json,
@@ -2928,9 +2974,9 @@ def run_picking_flow(
         env_file=env_file,
         reset_session=reset_session,
     )
+
     if rc_shipping != 0:
-        print("[ERROR] Falló run_picking_shipping dentro de picking_flow")
-        return rc_shipping
+        print("[WARN] run_picking_shipping no resolvió shipping; continúo igual con closure_iterative")
 
     # ------------------------------------------------------------
     # Paso 3: ejecutar cierre iterativo usando la misma sesión
