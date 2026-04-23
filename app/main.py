@@ -2594,6 +2594,126 @@ def run_closure_iterative(
 
     return 0 if closure_result.get("status") == "success" else 2
 
+# def run_picking_shipping(
+#     *,
+#     picking_image: Path,
+#     summary_json: Optional[Path] = None,
+#     session_state_json: Optional[Path] = None,
+#     output_path: Optional[Path] = None,
+#     env_file: str = ".env",
+#     reset_session: bool = False,
+# ) -> int:
+#     try:
+#         from utils.vision_picking import (
+#             read_picking_shipping,
+#             PickingSheetConfig,
+#             build_picking_debug_images,
+#             save_debug_images,
+#         )
+#         #from utils.vision_picking import read_picking_shipping, PickingSheetConfig
+#     except Exception as e:
+#         print(f"[ERROR] No pude importar utils.vision_picking: {e}")
+#         return 2
+    
+#     import cv2
+
+#     if not picking_image.exists():
+#         print(f"[ERROR] No existe picking_image: {picking_image}")
+#         return 2
+
+#     summary_payload: Dict[str, Any] = {}
+#     if summary_json is not None:
+#         if not summary_json.exists():
+#             print(f"[ERROR] No existe summary_json: {summary_json}")
+#             return 2
+
+#         summary_payload = safe_read_json(summary_json) or {}
+#         if not summary_payload:
+#             print(f"[ERROR] No pude leer summary_json: {summary_json}")
+#             return 2
+
+#     img = cv2.imread(str(picking_image))
+#     if img is None:
+#         print(f"[ERROR] No se pudo cargar la imagen: {picking_image}")
+#         return 2
+
+#     cfg = PickingSheetConfig(
+#         dynamsoft_env_file=env_file,
+#     )
+
+#     print("[INFO] Ejecutando lectura de hoja de picking")
+#     print(f"[INFO] picking_image: {picking_image}")
+#     if summary_json:
+#         print(f"[INFO] summary_json: {summary_json}")
+#     if session_state_json:
+#         print(f"[INFO] session_state_json: {session_state_json}")
+
+#     picking_result = read_picking_shipping(img, cfg=cfg)
+
+#     session = ClosureSession(
+#         summary_payload=summary_payload,
+#         state_path=session_state_json,
+#         summary_json_path=summary_json,
+#     )
+
+#     if reset_session:
+#         print("[INFO] Reiniciando sesión antes de registrar hoja de picking")
+#         session.clear()
+
+#     detected_shipping = picking_result.get("shipping")
+#     detected_source = picking_result.get("source")
+
+#     resolution_status = "not_found"
+#     if detected_shipping:
+#         resolution_status = "resolved_from_picking_sheet"
+
+#     session.set_target_shipping_resolution(
+#         status=resolution_status,
+#         target_shipping=detected_shipping,
+#         target_ruta=None,
+#         target_sku=None,
+#         target_shipping_expected_units=0,
+#         target_shipping_observed_units=0,
+#         resolved_from_barcode=None,
+#     )
+#     session.save()
+
+#     payload = {
+#         "status": "success" if detected_shipping else "not_found",
+#         "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
+#         "mode_app": "picking_shipping",
+#         "picking_image": str(picking_image),
+#         "summary_json": str(summary_json) if summary_json else None,
+#         "session_state_json": str(session_state_json) if session_state_json else None,
+#         "shipping_result": picking_result,
+#         "session": {
+#             "session_id": session.session_id,
+#             "session_status": session.session_status,
+#             "shipping_resolution_status": session.shipping_resolution_status,
+#             "target_shipping": session.target_shipping,
+#             "target_ruta": session.target_ruta,
+#             "target_sku": session.target_sku,
+#             "target_shipping_expected_units": session.target_shipping_expected_units,
+#             "target_shipping_observed_units": session.target_shipping_observed_units,
+#         },
+#         "event_context": {
+#             "detected_shipping": detected_shipping,
+#             "detected_source": detected_source,
+#             "sheet_found": picking_result.get("sheet_found"),
+#         },
+#     }
+
+#     if output_path is None:
+#         output_dir = Path("data/picking")
+#         output_dir.mkdir(parents=True, exist_ok=True)
+#         output_path = output_dir / f"{picking_image.stem}_picking_shipping.json"
+
+#     safe_write_json(output_path, payload)
+
+#     print(f"[OK] Resultado picking_shipping guardado en: {output_path}")
+#     print(json.dumps(payload, ensure_ascii=False, indent=2))
+#     return 0 if detected_shipping else 2
+
 def run_picking_shipping(
     *,
     picking_image: Path,
@@ -2604,11 +2724,16 @@ def run_picking_shipping(
     reset_session: bool = False,
 ) -> int:
     try:
-        from utils.vision_picking import read_picking_shipping, PickingSheetConfig
+        from utils.vision_picking import (
+            read_picking_shipping,
+            PickingSheetConfig,
+            build_picking_debug_images,
+            save_debug_images,
+        )
     except Exception as e:
         print(f"[ERROR] No pude importar utils.vision_picking: {e}")
         return 2
-    
+
     import cv2
 
     if not picking_image.exists():
@@ -2643,6 +2768,27 @@ def run_picking_shipping(
         print(f"[INFO] session_state_json: {session_state_json}")
 
     picking_result = read_picking_shipping(img, cfg=cfg)
+
+    # ------------------------------------------------------------
+    # NUEVO: guardar imágenes debug del picking
+    # ------------------------------------------------------------
+    debug_dir = Path("results/picking/debug")
+    debug_images = build_picking_debug_images(img, picking_result, cfg=cfg)
+    saved_debug_paths = save_debug_images(
+        debug_images,
+        str(debug_dir),
+        stem=picking_image.stem,
+    )
+
+    debug_images_map: Dict[str, str] = {}
+    for p in saved_debug_paths:
+        pp = Path(p)
+        debug_images_map[pp.name] = str(pp)
+
+    input_image_path = debug_images_map.get(f"{picking_image.stem}_input.png")
+    input_labeled_path = debug_images_map.get(f"{picking_image.stem}_input_labeled.png")
+    input_detected_path = debug_images_map.get(f"{picking_image.stem}_input_detected.png")
+    input_hybrid_path = debug_images_map.get(f"{picking_image.stem}_input_hybrid.png")
 
     session = ClosureSession(
         summary_payload=summary_payload,
@@ -2680,6 +2826,16 @@ def run_picking_shipping(
         "summary_json": str(summary_json) if summary_json else None,
         "session_state_json": str(session_state_json) if session_state_json else None,
         "shipping_result": picking_result,
+        "picking_debug": {
+            "debug_dir": str(debug_dir),
+            "images": {
+                "input": input_image_path,
+                "input_labeled": input_labeled_path,
+                "input_detected": input_detected_path,
+                "input_hybrid": input_hybrid_path,
+            },
+            "saved_paths": saved_debug_paths,
+        },
         "session": {
             "session_id": session.session_id,
             "session_status": session.session_status,
@@ -2704,13 +2860,19 @@ def run_picking_shipping(
 
     safe_write_json(output_path, payload)
 
+    #print(f"[OK] Resultado picking_shipping guardado en: {output_path}")
     print(f"[OK] Resultado picking_shipping guardado en: {output_path}")
-    #print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    if saved_debug_paths:
+        print("[OK] Debug picking guardado en:")
+        for s in saved_debug_paths:
+            print(f" - {s}")
+
     try:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     except UnicodeEncodeError:
         print(json.dumps(payload, ensure_ascii=True, indent=2))
-    
+
     return 0 if detected_shipping else 2
 
 def run_picking_flow(

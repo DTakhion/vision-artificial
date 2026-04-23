@@ -20,7 +20,64 @@ done
 ``` bash
 python -m uvicorn backend.main:app --reload
 ```
+# utils/vision_barcode_yolo_v2.py
+## sin debug
+``` bash
+python -m utils.vision_barcode_yolo_v2 \
+  data/Build_Dataset_KN/test/images/frames_20260415_125320_jpg.rf.9c4afcf0189ea8289b9c21c908506024.jpg \
+  --save-vis \
+  --save-json \
+  --save-crops
+```
+# con debug
+``` bash
+python -m utils.vision_barcode_yolo_v2 \
+  data/Build_Dataset_KN/test/images/frames_20260415_125320_jpg.rf.9c4afcf0189ea8289b9c21c908506024.jpg \
+  --save-vis \
+  --save-json \
+  --save-crops \
+  --debug
+```
 
+# utils/vision_readout_hybrid.py
+## sin salida explicita, lo deja en la misma ruta de la imagen utilizada 
+``` bash
+python -m utils.vision_readout_hybrid \
+  data/Build_Dataset_KN/test/images/frames_20260415_125320_jpg.rf.9c4afcf0189ea8289b9c21c908506024.jpg \
+  --json \
+  --save-vis \
+  --save-json
+```
+## con salida explicita (hay que importar el modelo)
+``` bash
+python -m utils.vision_readout_hybrid \
+  data/tests_picking/frame_03-1.jpg \
+  --model models/barcode_kn_v2.pt \
+  --save-json \
+  --save-vis \
+  --json-out results/output_hybridNew_1.json \
+  --vis-out results/output_hybridNew_1.jpg
+```
+# utils/vision_picking.py
+
+``` bash
+python -m utils.vision_picking \
+  data/tests_picking/frame_03.jpg \
+  --save-json \
+  --save-debug
+```
+# app/main.py -> picking_flow
+``` bash
+python -m app.main \
+  --mode_app picking_flow \
+  --picking_image data/tests_picking/frame_03.jpg \
+  --picking_excel data/fillrate/latest/fillrate_latest.xlsx \
+  --packstructure_excel data/tests_picking/PackStructure.xlsx \
+  --readout_json results/output_readout.json \
+  --session_state_json data/closure/session_state.json \
+  --closure_output data/closure/output.json \
+  --reset_session
+```
 
 ## paso 3; Cierre (app/main.py function clousure_match/clousure_iterative)
 ``` bash
