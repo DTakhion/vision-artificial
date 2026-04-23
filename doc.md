@@ -229,4 +229,47 @@ python -m utils.vision_picking data/tests_picking/tu_imagen.jpg --json --save-de
   --session_state_json data/closure/session_state.json \      
   --closure_output data/picking/frame_03_picking_shipping.json
 ```
+# Flujo desde backend/main.py para review
+## frontend bottom capture caja + hoja picking
+POST /vision/capture (de backend/main.py) -> ejecuta script CAPTURE_SCRIPT_PATH = BASE_DIR / "scripts" / "capture_opencv.py" -> arma el comando;
+cmd = [
+    sys.executable,
+    str(CAPTURE_SCRIPT_PATH),
+    "--device", "0",
+    "--width", "1920",
+    "--height", "1080",
+    "--fps", "30",
+    "--out_dir", "data/captures/opencv",
+    "--events",
+    "--roi", "80", "80", "1700", "900",
+    "--every", "0",
+]
+Se ejecuta el mismo script para el boton "capturar hoja de picking" 
+
+## Procesar
+Cadena de sucesos, 
+1) se ejecuta el procesamiento de la caja con; 
+python -m utils.vision_readout_hybrid <box_frame_path> \
+  --save-json --json-out <event_dir>/readout_result.json \
+  --save-vis  --vis-out  <event_dir>/readout_vis.jpg
+
+2) se ejecuta el procesamienrto de la hoja de picking; 
+python -m app.main \
+  --mode_app picking_shipping \
+  --picking_image <ruta_hoja_picking> \
+  --session_state_json data/closure/session_state_test.json \
+  --closure_output data/picking/test_picking_shipping.json \
+  --reset_session
+
+session_state_json y closure_output (esta es la salida importante de este proceso, esta es la que contiene la data del shipping) son json de sesion/control/trazabilidad "internos"
+No se explicito, pero se usa tambien --summary_json <summary_json_si_lo_tienes_opcional> \ que corresponde a la normalizacion/filtrado inicial del fillRate + PackStructure 
+
+3) closure_iterative
+ python -m app.main \
+  --mode_app closure_iterative \
+  --summary_json data/picking/summary_fillRate_packStructure/fillrate_latest_summary_fillRate_packStructure_test_2.json \
+  --readout_json data/tests_picking/readout_result.json \
+  --session_state_json data/closure/session_state_test.json \
+  --closure_output data/closure/test_closure_iterative.json \
+  --reset_session
 
