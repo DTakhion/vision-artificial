@@ -407,6 +407,8 @@ def process_capture(payload: ProcessRequest):
             "-m",
             "utils.vision_readout_hybrid",
             str(box_frame_path),
+            "--model",
+            "models/barcode_kn_v2.pt",
             "--save-json",
             "--json-out",
             str(readout_json_path),
