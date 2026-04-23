@@ -41,6 +41,7 @@ DEFAULT_PICKING_EXCEL = BASE_DIR / "data" / "fillrate" / "latest" / "fillrate_la
 DEFAULT_PACKSTRUCTURE_EXCEL = BASE_DIR / "data" / "tests_picking" / "PackStructure.xlsx"
 
 app.mount("/data", StaticFiles(directory=BASE_DIR / "data"), name="data")
+app.mount("/results", StaticFiles(directory=BASE_DIR / "results"), name="results")
 
 
 # ============================================================
@@ -77,6 +78,16 @@ def path_to_data_url(path: Optional[Path]) -> Optional[str]:
     try:
         rel = path.resolve().relative_to((BASE_DIR / "data").resolve())
         return f"/data/{rel.as_posix()}"
+    except Exception:
+        return None
+
+def path_to_results_url(path: Optional[Path]) -> Optional[str]:
+    if path is None:
+        return None
+
+    try:
+        rel = path.resolve().relative_to((BASE_DIR / "results").resolve())
+        return f"/results/{rel.as_posix()}"
     except Exception:
         return None
 
@@ -209,6 +220,14 @@ def build_process_response(
     closure_payload = safe_read_json(closure_output_path) or {}
     shipping_payload = safe_read_json(picking_shipping_json_path) or {}
     session_payload = safe_read_json(session_state_json_path) or {}
+    
+    picking_debug = shipping_payload.get("picking_debug") or {}
+    picking_debug_images = picking_debug.get("images") or {}
+
+    picking_debug_input_path = normalize_input_path(picking_debug_images.get("input"))
+    picking_debug_labeled_path = normalize_input_path(picking_debug_images.get("input_labeled"))
+    picking_debug_detected_path = normalize_input_path(picking_debug_images.get("input_detected"))
+    picking_debug_hybrid_path = normalize_input_path(picking_debug_images.get("input_hybrid"))
 
     frontend_summary = closure_payload.get("frontend_summary")
     operator_feedback = closure_payload.get("operator_feedback")
@@ -232,6 +251,19 @@ def build_process_response(
             "readout_json_url": path_to_data_url(readout_json_path) if readout_json_path.exists() else None,
             "readout_vis": str(readout_vis_path) if readout_vis_path.exists() else None,
             "readout_vis_url": path_to_data_url(readout_vis_path) if readout_vis_path.exists() else None,
+            
+            "picking_debug_input": str(picking_debug_input_path) if picking_debug_input_path and picking_debug_input_path.exists() else None,
+            "picking_debug_input_url": path_to_results_url(picking_debug_input_path) if picking_debug_input_path and picking_debug_input_path.exists() else None,
+
+            "picking_debug_labeled": str(picking_debug_labeled_path) if picking_debug_labeled_path and picking_debug_labeled_path.exists() else None,
+            "picking_debug_labeled_url": path_to_results_url(picking_debug_labeled_path) if picking_debug_labeled_path and picking_debug_labeled_path.exists() else None,
+
+            "picking_debug_detected": str(picking_debug_detected_path) if picking_debug_detected_path and picking_debug_detected_path.exists() else None,
+            "picking_debug_detected_url": path_to_results_url(picking_debug_detected_path) if picking_debug_detected_path and picking_debug_detected_path.exists() else None,
+
+            "picking_debug_hybrid": str(picking_debug_hybrid_path) if picking_debug_hybrid_path and picking_debug_hybrid_path.exists() else None,
+            "picking_debug_hybrid_url": path_to_results_url(picking_debug_hybrid_path) if picking_debug_hybrid_path and picking_debug_hybrid_path.exists() else None,
+            
             "summary_json": str(summary_json_path) if summary_json_path.exists() else None,
             "summary_json_url": path_to_data_url(summary_json_path) if summary_json_path.exists() else None,
             "picking_shipping_json": str(picking_shipping_json_path) if picking_shipping_json_path.exists() else None,
