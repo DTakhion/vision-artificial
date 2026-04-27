@@ -411,7 +411,7 @@ def read_barcodes_hybrid(
     model_path: str = DEFAULT_MODEL_PATH,
     yolo_conf: float = 0.10,
     yolo_iou: float = 0.45,
-    yolo_max_det: int = 10,
+    yolo_max_det: int = 20, #10
     yolo_min_size: int = 20,
     yolo_pad_ratio: float = 0.25,
     yolo_decoder_mode: str = "collect_plus",   # compatibilidad; no se usa
@@ -711,7 +711,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--yolo-conf", type=float, default=0.10)
     parser.add_argument("--yolo-iou", type=float, default=0.45)
-    parser.add_argument("--yolo-max-det", type=int, default=10)
+    parser.add_argument("--yolo-max-det", type=int, default=20) #10
     parser.add_argument("--yolo-min-size", type=int, default=20)
     parser.add_argument("--yolo-pad-ratio", type=float, default=0.25)
 
