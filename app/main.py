@@ -2545,10 +2545,35 @@ def run_closure_iterative(
                 "captures_processed": len(session.get_captures_processed()),
             },
         },
+        #"target_shipping_resolution": shipping_resolution,
+        #"target_shipping_observation": target_observation,
+        #"target_shipping_complete": target_shipping_complete,
+        #"effective_closure_status": effective_closure_status,
+        
         "target_shipping_resolution": shipping_resolution,
         "target_shipping_observation": target_observation,
         "target_shipping_complete": target_shipping_complete,
         "effective_closure_status": effective_closure_status,
+        "target_shipping_summary": {
+            "status": effective_closure_status,
+            "shipping": session.target_shipping,
+            "ruta": session.target_ruta,
+            "sku": session.target_sku,
+            "expected_units": session.target_shipping_expected_units,
+            "observed_units": session.target_shipping_observed_units,
+            "difference_units": (
+                session.target_shipping_expected_units
+                - session.target_shipping_observed_units
+            ),
+            "matched_items": target_observation.get("matched_items", []),
+            "barcode_hits_in_target_shipping": target_observation.get(
+                "barcode_hits_in_target_shipping",
+                {},
+            ),
+            "resolution_status": session.shipping_resolution_status,
+            "resolved_from_barcode": session.resolved_from_barcode,
+        },
+                
         "operator_feedback": {
             "missing_products_count": len(missing_products),
             "partial_products_count": len(partial_products),
