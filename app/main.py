@@ -860,6 +860,167 @@ def _build_pack_index(match_result: Dict[str, Any]) -> Dict[str, Dict[str, Any]]
     return idx
 
 
+# def build_final_picking_summary(
+#     *,
+#     fillrate_result: Dict[str, Any],
+#     fillrate_packstructure_match: Dict[str, Any],
+#     fillrate_excel: Path,
+#     packstructure_excel: Path,
+# ) -> Dict[str, Any]:
+#     fillrate_records = fillrate_result.get("records", []) or []
+#     products = fillrate_packstructure_match.get("products", []) or []
+
+#     total_cant_original = 0
+#     total_cant_trabajada = 0
+#     total_diferencia = 0
+#     matched_count = 0
+
+#     consolidated_products: List[Dict[str, Any]] = []
+
+#     for prod in products:
+#         fillrate_matches = prod.get("fillrate_matches", []) or []
+#         pack = prod.get("packstructure") or {}
+        
+#         matches_by_shipping: Dict[str, List[Dict[str, Any]]] = {}
+#         for row in fillrate_matches:
+#             sh = str(row.get("shipping") or "").strip()
+            
+#             if not sh:
+#                 excel_full = row.get("excel_full") or {}
+#                 sh = str(excel_full.get("Shipping") or "").strip()
+            
+#             if not sh:
+#                 sh = "UNKNOWN"
+                
+#             matches_by_shipping.setdefault(sh, []).append(row)
+
+#         if prod.get("match_status") == "matched":
+#             matched_count += 1
+
+#         sku = prod.get("sku_fillrate")
+#         descripcion_fillrate = prod.get("descripcion_fillrate")
+        
+#         for shipping_key, grouped_rows in matches_by_shipping.items():
+            
+#             # sku_cant_original = 0
+#             # sku_cant_trabajada = 0
+#             # sku_diferencia = 0
+
+#             # shipping_values: List[str] = []
+#             # ruta_values: List[str] = []
+#             # estado_orden_values: List[str] = []
+#             # descripcion_estado_values: List[str] = []
+
+#             # fillrate_full_list: List[Dict[str, Any]] = []
+            
+#             sku_cant_original = 0
+#             sku_cant_trabajada = 0
+#             sku_diferencia = 0
+            
+#             shipping_values = []
+#             ruta_values = []
+#             estado_orden_values = []
+#             descripcion_estado_values = []
+            
+#             fillrate_full_list = []
+            
+#             for row in grouped_rows:
+
+#             # for row in fillrate_matches:
+#             try:
+#                 sku_cant_original += int(row.get("cant_original") or 0)
+#             except Exception:
+#                 pass
+#             try:
+#                 sku_cant_trabajada += int(row.get("cant_trabajada") or 0)
+#             except Exception:
+#                 pass
+#             try:
+#                 sku_diferencia += int(row.get("diferencia") or 0)
+#             except Exception:
+#                 pass
+
+#             sh = row.get("shipping")
+#             rt = row.get("ruta")
+#             eo = _norm_estado_orden_display(row.get("estado_orden"))
+#             de = row.get("descripcion_estado")
+
+#             if sh:
+#                 shipping_values.append(str(sh))
+#             if rt:
+#                 ruta_values.append(str(rt))
+#             if eo:
+#                 estado_orden_values.append(eo)
+#             if de:
+#                 descripcion_estado_values.append(str(de))
+
+#             excel_full_summary = _build_fillrate_full_summary(row)
+#             if excel_full_summary:
+#                 fillrate_full_list.append(excel_full_summary)
+
+#         shipping_values = _dedupe_strings_preserve_order(shipping_values)
+#         ruta_values = _dedupe_strings_preserve_order(ruta_values)
+#         estado_orden_values = _dedupe_strings_preserve_order(estado_orden_values)
+#         descripcion_estado_values = _dedupe_strings_preserve_order(descripcion_estado_values)
+
+#         total_cant_original += sku_cant_original
+#         total_cant_trabajada += sku_cant_trabajada
+#         total_diferencia += sku_diferencia
+
+#         packstructure_full = pack.get("packstructure_full", {}) if isinstance(pack, dict) else {}
+
+#         consolidated_products.append(
+#             {
+#                 "sku": sku,
+#                 "descripcion_fillrate": descripcion_fillrate,
+#                 "descripcion_packstructure": prod.get("descripcion_packstructure"),
+#                 "match_status": prod.get("match_status"),
+#                 "fillrate_match_count": prod.get("fillrate_match_count"),
+#                 "packstructure_match_count": prod.get("packstructure_match_count"),
+#                 "shipping_values": shipping_values,
+#                 "ruta_values": ruta_values,
+#                 "estado_orden_values": estado_orden_values,
+#                 "descripcion_estado_values": descripcion_estado_values,
+#                 "cant_original_total": sku_cant_original,
+#                 "cant_trabajada_total": sku_cant_trabajada,
+#                 "diferencia_total": sku_diferencia,
+#                 "ean_ea": prod.get("ean_ea"),
+#                 "ean_in": prod.get("ean_in"),
+#                 "ean_cs": prod.get("ean_cs"),
+#                 "qty_ea": prod.get("qty_ea"),
+#                 "qty_inn": prod.get("qty_inn"),
+#                 "qty_cs": prod.get("qty_cs"),
+#                 "qty_pal": prod.get("qty_pal"),
+#                 "fillrate_full": fillrate_full_list,
+#                 "packstructure_full": packstructure_full,
+#             }
+#         )
+
+#     return {
+#         "status": "success",
+#         "processed_at_local": time.strftime("%Y-%m-%d %H:%M:%S"),
+#         "document_type": "summary_fillRate_packStructure",
+#         "inputs": {
+#             "fillrate_excel": str(fillrate_excel),
+#             "packstructure_excel": str(packstructure_excel),
+#         },
+#         "filter_applied": fillrate_packstructure_match.get("filter_applied", {}),
+#         "products": consolidated_products,
+#         "counts": {
+#             "fillrate_rows_total": len(fillrate_records),
+#             "filtered_unique_products": len(products),
+#             "packstructure_matched_products": matched_count,
+#             "packstructure_not_found_products": sum(
+#                 1 for p in products if p.get("match_status") == "not_found_in_packstructure"
+#             ),
+#         },
+#         "totals": {
+#             "cant_original_total": total_cant_original,
+#             "cant_trabajada_total": total_cant_trabajada,
+#             "diferencia_total": total_diferencia,
+#         },
+#     }
+
 def build_final_picking_summary(
     *,
     fillrate_result: Dict[str, Any],
@@ -881,92 +1042,110 @@ def build_final_picking_summary(
         fillrate_matches = prod.get("fillrate_matches", []) or []
         pack = prod.get("packstructure") or {}
 
+        matches_by_shipping: Dict[str, List[Dict[str, Any]]] = {}
+
+        for row in fillrate_matches:
+            sh = str(row.get("shipping") or "").strip()
+
+            if not sh:
+                excel_full = row.get("excel_full") or {}
+                sh = str(excel_full.get("Shipping") or "").strip()
+
+            if not sh:
+                sh = "UNKNOWN"
+
+            matches_by_shipping.setdefault(sh, []).append(row)
+
         if prod.get("match_status") == "matched":
             matched_count += 1
 
         sku = prod.get("sku_fillrate")
         descripcion_fillrate = prod.get("descripcion_fillrate")
 
-        sku_cant_original = 0
-        sku_cant_trabajada = 0
-        sku_diferencia = 0
+        for shipping_key, grouped_rows in matches_by_shipping.items():
 
-        shipping_values: List[str] = []
-        ruta_values: List[str] = []
-        estado_orden_values: List[str] = []
-        descripcion_estado_values: List[str] = []
+            sku_cant_original = 0
+            sku_cant_trabajada = 0
+            sku_diferencia = 0
 
-        fillrate_full_list: List[Dict[str, Any]] = []
+            shipping_values = []
+            ruta_values = []
+            estado_orden_values = []
+            descripcion_estado_values = []
 
-        for row in fillrate_matches:
-            try:
-                sku_cant_original += int(row.get("cant_original") or 0)
-            except Exception:
-                pass
-            try:
-                sku_cant_trabajada += int(row.get("cant_trabajada") or 0)
-            except Exception:
-                pass
-            try:
-                sku_diferencia += int(row.get("diferencia") or 0)
-            except Exception:
-                pass
+            fillrate_full_list = []
 
-            sh = row.get("shipping")
-            rt = row.get("ruta")
-            eo = _norm_estado_orden_display(row.get("estado_orden"))
-            de = row.get("descripcion_estado")
+            for row in grouped_rows:
+                try:
+                    sku_cant_original += int(row.get("cant_original") or 0)
+                except Exception:
+                    pass
 
-            if sh:
-                shipping_values.append(str(sh))
-            if rt:
-                ruta_values.append(str(rt))
-            if eo:
-                estado_orden_values.append(eo)
-            if de:
-                descripcion_estado_values.append(str(de))
+                try:
+                    sku_cant_trabajada += int(row.get("cant_trabajada") or 0)
+                except Exception:
+                    pass
 
-            excel_full_summary = _build_fillrate_full_summary(row)
-            if excel_full_summary:
-                fillrate_full_list.append(excel_full_summary)
+                try:
+                    sku_diferencia += int(row.get("diferencia") or 0)
+                except Exception:
+                    pass
 
-        shipping_values = _dedupe_strings_preserve_order(shipping_values)
-        ruta_values = _dedupe_strings_preserve_order(ruta_values)
-        estado_orden_values = _dedupe_strings_preserve_order(estado_orden_values)
-        descripcion_estado_values = _dedupe_strings_preserve_order(descripcion_estado_values)
+                sh = row.get("shipping")
+                rt = row.get("ruta")
+                eo = _norm_estado_orden_display(row.get("estado_orden"))
+                de = row.get("descripcion_estado")
 
-        total_cant_original += sku_cant_original
-        total_cant_trabajada += sku_cant_trabajada
-        total_diferencia += sku_diferencia
+                if sh:
+                    shipping_values.append(str(sh))
+                if rt:
+                    ruta_values.append(str(rt))
+                if eo:
+                    estado_orden_values.append(eo)
+                if de:
+                    descripcion_estado_values.append(str(de))
 
-        packstructure_full = pack.get("packstructure_full", {}) if isinstance(pack, dict) else {}
+                excel_full_summary = _build_fillrate_full_summary(row)
+                if excel_full_summary:
+                    fillrate_full_list.append(excel_full_summary)
 
-        consolidated_products.append(
-            {
-                "sku": sku,
-                "descripcion_fillrate": descripcion_fillrate,
-                "descripcion_packstructure": prod.get("descripcion_packstructure"),
-                "match_status": prod.get("match_status"),
-                "fillrate_match_count": prod.get("fillrate_match_count"),
-                "packstructure_match_count": prod.get("packstructure_match_count"),
-                "shipping_values": shipping_values,
-                "ruta_values": ruta_values,
-                "estado_orden_values": estado_orden_values,
-                "descripcion_estado_values": descripcion_estado_values,
-                "cant_original_total": sku_cant_original,
-                "cant_trabajada_total": sku_cant_trabajada,
-                "diferencia_total": sku_diferencia,
-                "ean_ea": prod.get("ean_ea"),
-                "ean_in": prod.get("ean_in"),
-                "ean_cs": prod.get("ean_cs"),
-                "qty_ea": prod.get("qty_ea"),
-                "qty_inn": prod.get("qty_inn"),
-                "qty_cs": prod.get("qty_cs"),
-                "qty_pal": prod.get("qty_pal"),
-                "fillrate_full": fillrate_full_list,
-                "packstructure_full": packstructure_full,
-            }
-        )
+            shipping_values = _dedupe_strings_preserve_order(shipping_values)
+            ruta_values = _dedupe_strings_preserve_order(ruta_values)
+            estado_orden_values = _dedupe_strings_preserve_order(estado_orden_values)
+            descripcion_estado_values = _dedupe_strings_preserve_order(descripcion_estado_values)
+
+            total_cant_original += sku_cant_original
+            total_cant_trabajada += sku_cant_trabajada
+            total_diferencia += sku_diferencia
+
+            packstructure_full = pack.get("packstructure_full", {}) if isinstance(pack, dict) else {}
+
+            consolidated_products.append(
+                {
+                    "sku": sku,
+                    "descripcion_fillrate": descripcion_fillrate,
+                    "descripcion_packstructure": prod.get("descripcion_packstructure"),
+                    "match_status": prod.get("match_status"),
+                    "fillrate_match_count": len(grouped_rows),
+                    "packstructure_match_count": prod.get("packstructure_match_count"),
+                    "shipping_values": shipping_values,
+                    "ruta_values": ruta_values,
+                    "estado_orden_values": estado_orden_values,
+                    "descripcion_estado_values": descripcion_estado_values,
+                    "cant_original_total": sku_cant_original,
+                    "cant_trabajada_total": sku_cant_trabajada,
+                    "diferencia_total": sku_diferencia,
+                    "ean_ea": prod.get("ean_ea"),
+                    "ean_in": prod.get("ean_in"),
+                    "ean_cs": prod.get("ean_cs"),
+                    "qty_ea": prod.get("qty_ea"),
+                    "qty_inn": prod.get("qty_inn"),
+                    "qty_cs": prod.get("qty_cs"),
+                    "qty_pal": prod.get("qty_pal"),
+                    "fillrate_full": fillrate_full_list,
+                    "packstructure_full": packstructure_full,
+                }
+            )
 
     return {
         "status": "success",
@@ -992,7 +1171,6 @@ def build_final_picking_summary(
             "diferencia_total": total_diferencia,
         },
     }
-
 
 # ============================================================
 # FillRate + PackStructure
