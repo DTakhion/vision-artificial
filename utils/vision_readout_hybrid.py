@@ -169,6 +169,32 @@ def _bbox_iou(b1: List[int] | None, b2: List[int] | None) -> float:
 
     return inter / union
 
+def _bbox_area(b: List[int] | None) -> float:
+    if not b or len(b) != 4:
+        return 0.0
+    return float(max(0, b[2] - b[0]) * max(0, b[3] - b[1]))
+
+
+def _bbox_intersection_over_min_area(
+    b1: List[int] | None,
+    b2: List[int] | None,
+) -> float:
+    if not b1 or not b2 or len(b1) != 4 or len(b2) != 4:
+        return 0.0
+
+    x1 = max(b1[0], b2[0])
+    y1 = max(b1[1], b2[1])
+    x2 = min(b1[2], b2[2])
+    y2 = min(b1[3], b2[3])
+
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    min_area = min(_bbox_area(b1), _bbox_area(b2))
+
+    if min_area <= 0:
+        return 0.0
+
+    return inter / min_area
+
 
 def _bbox_center_distance(b1: List[int] | None, b2: List[int] | None) -> float:
     if not b1 or not b2 or len(b1) != 4 or len(b2) != 4:
@@ -198,6 +224,43 @@ def _merge_bbox(b1: List[int] | None, b2: List[int] | None) -> List[int] | None:
     ]
 
 
+# def _should_consider_same_object(
+#     current: Dict[str, Any],
+#     prev: Dict[str, Any],
+#     iou: float,
+#     dist: float,
+# ) -> bool:
+#     """
+#     Regla principal:
+#     - mismo texto
+#     - y además cercanía/solape suficiente
+
+#     Casos especiales:
+#     - full_image vs roi_label
+#     - full_image vs roi_barcode
+#     - roi_label vs roi_barcode
+#     """
+#     if (iou >= 0.50) or (dist <= 35.0):
+#         return True
+
+#     current_source = str(current.get("source", "")).strip()
+#     prev_source = str(prev.get("source", "")).strip()
+#     pair = {current_source, prev_source}
+
+#     if pair == {"full_image", "roi_label"}:
+#         if (iou >= 0.02) or (dist <= 220.0):
+#             return True
+
+#     if pair == {"full_image", "roi_barcode"}:
+#         if (iou >= 0.01) or (dist <= 180.0):
+#             return True
+
+#     if pair == {"roi_label", "roi_barcode"}:
+#         if (iou >= 0.01) or (dist <= 180.0):
+#             return True
+
+#     return False
+
 def _should_consider_same_object(
     current: Dict[str, Any],
     prev: Dict[str, Any],
@@ -205,16 +268,28 @@ def _should_consider_same_object(
     dist: float,
 ) -> bool:
     """
-    Regla principal:
+    Considera duplicado si:
     - mismo texto
-    - y además cercanía/solape suficiente
+    - y hay solape fuerte, cercanía o una bbox está contenida mayormente en otra.
 
-    Casos especiales:
-    - full_image vs roi_label
-    - full_image vs roi_barcode
-    - roi_label vs roi_barcode
+    Esto corrige el caso típico:
+    - ROI barcode grande padded
+    - ROI barcode más ajustada
+    ambas leyendo el mismo código.
     """
-    if (iou >= 0.50) or (dist <= 35.0):
+    current_bbox = current.get("bbox")
+    prev_bbox = prev.get("bbox")
+
+    overlap_min = _bbox_intersection_over_min_area(current_bbox, prev_bbox)
+
+    if iou >= 0.50:
+        return True
+
+    if dist <= 35.0:
+        return True
+
+    # Caso clave: una caja chica contenida dentro de una grande
+    if overlap_min >= 0.75:
         return True
 
     current_source = str(current.get("source", "")).strip()
@@ -222,15 +297,19 @@ def _should_consider_same_object(
     pair = {current_source, prev_source}
 
     if pair == {"full_image", "roi_label"}:
-        if (iou >= 0.02) or (dist <= 220.0):
+        if (iou >= 0.02) or (dist <= 220.0) or (overlap_min >= 0.50):
             return True
 
     if pair == {"full_image", "roi_barcode"}:
-        if (iou >= 0.01) or (dist <= 180.0):
+        if (iou >= 0.01) or (dist <= 180.0) or (overlap_min >= 0.50):
             return True
 
     if pair == {"roi_label", "roi_barcode"}:
-        if (iou >= 0.01) or (dist <= 180.0):
+        if (iou >= 0.01) or (dist <= 180.0) or (overlap_min >= 0.50):
+            return True
+
+    if pair == {"roi_barcode"}:
+        if overlap_min >= 0.60:
             return True
 
     return False
@@ -276,13 +355,18 @@ def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         else:
             prev = kept[duplicate_idx]
             prev_score = float(prev.get("_score", -1.0))
-
+            
             if current_score > prev_score:
-                item["bbox"] = _merge_bbox(item.get("bbox"), prev.get("bbox"))
                 kept[duplicate_idx] = item
             else:
-                prev["bbox"] = _merge_bbox(prev.get("bbox"), item.get("bbox"))
                 kept[duplicate_idx] = prev
+
+            # if current_score > prev_score:
+            #     item["bbox"] = _merge_bbox(item.get("bbox"), prev.get("bbox"))
+            #     kept[duplicate_idx] = item
+            # else:
+            #     prev["bbox"] = _merge_bbox(prev.get("bbox"), item.get("bbox"))
+            #     kept[duplicate_idx] = prev
 
     kept.sort(key=lambda x: float(x.get("_score", -1.0)), reverse=True)
 
