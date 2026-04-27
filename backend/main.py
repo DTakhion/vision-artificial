@@ -229,10 +229,21 @@ def build_process_response(
     picking_debug_detected_path = normalize_input_path(picking_debug_images.get("input_detected"))
     picking_debug_hybrid_path = normalize_input_path(picking_debug_images.get("input_hybrid"))
 
+    #frontend_summary = closure_payload.get("frontend_summary")
+    #operator_feedback = closure_payload.get("operator_feedback")
+    #closure_result = closure_payload.get("closure_result")
+    #closure_session = closure_payload.get("session")
+    
     frontend_summary = closure_payload.get("frontend_summary")
     operator_feedback = closure_payload.get("operator_feedback")
     closure_result = closure_payload.get("closure_result")
     closure_session = closure_payload.get("session")
+    
+    target_shipping_summary = closure_payload.get("target_shipping_summary")
+    target_shipping_resolution = closure_payload.get("target_shipping_resolution")
+    target_shipping_observation = closure_payload.get("target_shipping_observation")
+    target_shipping_complete = closure_payload.get("target_shipping_complete")
+    effective_closure_status = closure_payload.get("effective_closure_status")
 
     shipping_result = shipping_payload.get("shipping_result")
     shipping_session = shipping_payload.get("session")
@@ -276,10 +287,21 @@ def build_process_response(
         "shipping_result": shipping_result,
         "shipping_session": shipping_session,
         "shipping_event_context": shipping_event_context,
+        #"frontend_summary": frontend_summary,
+        #"operator_feedback": operator_feedback,
+        #"session": closure_session if isinstance(closure_session, dict) else session_payload,
+        #"closure_result": closure_result,
+        
         "frontend_summary": frontend_summary,
         "operator_feedback": operator_feedback,
         "session": closure_session if isinstance(closure_session, dict) else session_payload,
         "closure_result": closure_result,
+        
+        "target_shipping_summary": target_shipping_summary,
+        "target_shipping_resolution": target_shipping_resolution,
+        "target_shipping_observation": target_shipping_observation,
+        "target_shipping_complete": target_shipping_complete,
+        "effective_closure_status": effective_closure_status,
     }
 
 
