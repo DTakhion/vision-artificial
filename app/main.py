@@ -415,6 +415,18 @@ def _norm_barcode(x: Any) -> Optional[str]:
 
     return s
 
+def _norm_shipping(x: Any) -> Optional[str]:
+    if x is None:
+        return None
+
+    s = "".join(c for c in str(x).strip() if c.isdigit())
+
+    if not s:
+        return None
+
+    # Quita ceros a la izquierda: "0824609748" -> "824609748"
+    return str(int(s))
+
 
 def _norm_estado_orden_display(txt: Any) -> str:
     s = "" if txt is None else str(txt).strip()
@@ -467,6 +479,62 @@ def _extract_summary_products(summary_payload: Dict[str, Any]) -> List[Dict[str,
         return summary_payload.get("products") or []
 
     return []
+
+def _resolve_shipping_metadata_from_summary(
+    *,
+    summary_payload: Dict[str, Any],
+    target_shipping: Optional[str],
+) -> Dict[str, Any]:
+    target_shipping_norm = _norm_shipping(target_shipping)
+
+    if not target_shipping_norm:
+        return {
+            "target_ruta": None,
+            "target_sku": None,
+            "target_shipping_expected_units": 0,
+        }
+
+    products = _extract_summary_products(summary_payload)
+
+    expected_units = 0
+    rutas: List[str] = []
+    skus: List[str] = []
+
+    for prod in products:
+        shipping_values = prod.get("shipping_values") or []
+        if not isinstance(shipping_values, list):
+            continue
+
+        normalized_shippings = [
+            _norm_shipping(x)
+            for x in shipping_values
+            if _norm_shipping(x)
+        ]
+
+        if target_shipping_norm not in normalized_shippings:
+            continue
+
+        try:
+            expected_units += int(prod.get("cant_original_total") or 0)
+        except Exception:
+            pass
+
+        sku = prod.get("sku")
+        if sku:
+            skus.append(str(sku))
+
+        ruta_values = prod.get("ruta_values") or []
+        if isinstance(ruta_values, list):
+            rutas.extend([str(x).strip() for x in ruta_values if str(x).strip()])
+
+    rutas = _dedupe_strings_preserve_order(rutas)
+    skus = _dedupe_strings_preserve_order(skus)
+
+    return {
+        "target_ruta": rutas[0] if len(rutas) == 1 else None,
+        "target_sku": skus[0] if len(skus) == 1 else None,
+        "target_shipping_expected_units": expected_units,
+    }
 
 
 def _build_barcode_to_shipping_index(summary_payload: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
@@ -2984,16 +3052,34 @@ def run_picking_shipping(
     resolution_status = "not_found"
     if detected_shipping:
         resolution_status = "resolved_from_picking_sheet"
-
+        
+    # session.set_target_shipping_resolution(
+    #     status=resolution_status,
+    #     target_shipping=detected_shipping,
+    #     target_ruta=None,
+    #     target_sku=None,
+    #     target_shipping_expected_units=0,
+    #     target_shipping_observed_units=0,
+    #     resolved_from_barcode=None,
+    # )
+    
+    detected_shipping_norm = _norm_shipping(detected_shipping)
+    
+    shipping_meta = _resolve_shipping_metadata_from_summary(
+        summary_payload=summary_payload,
+        target_shipping=detected_shipping_norm,
+    )
+    
     session.set_target_shipping_resolution(
         status=resolution_status,
-        target_shipping=detected_shipping,
-        target_ruta=None,
-        target_sku=None,
-        target_shipping_expected_units=0,
+        target_shipping=detected_shipping_norm,
+        target_ruta=shipping_meta.get("target_ruta"),
+        target_sku=shipping_meta.get("target_sku"),
+        target_shipping_expected_units=int(shipping_meta.get("target_shipping_expected_units") or 0),
         target_shipping_observed_units=0,
         resolved_from_barcode=None,
     )
+    
     session.save()
 
     payload = {
